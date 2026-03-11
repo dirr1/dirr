@@ -4,7 +4,8 @@ import requests
 import os
 from collections import deque
 from dotenv import load_dotenv
-import google.generativeai as genai
+from google import genai
+from google.genai import types
 
 # Load environment variables from .env
 load_dotenv()
@@ -22,27 +23,22 @@ POLL_INTERVAL = 30 # Polling interval in seconds
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 DISCORD_WEBHOOK_URL = os.getenv("DISCORD_WEBHOOK_URL")
 
-if GEMINI_API_KEY:
-    genai.configure(api_key=GEMINI_API_KEY)
-
 class PolymarketInsiderAgent:
     def __init__(self):
         self.processed_trade_hashes = {} # map tx_hash -> timestamp for pruning
         self.market_cache = {}
         self.trade_history = {} # conditionId -> deque of trades within 5 min window
 
-        # Initialize Gemini 2.0 model with Google Search tool
+        # Initialize the new Google GenAI SDK client
         if GEMINI_API_KEY:
             try:
-                self.model = genai.GenerativeModel(
-                    model_name='gemini-2.0-flash',
-                    tools=[{'google_search': {}}]
-                )
+                self.client_ai = genai.Client(api_key=GEMINI_API_KEY)
+                self.model_id = 'gemini-2.0-flash'
             except Exception as e:
-                print(f"Error initializing Gemini model: {e}")
-                self.model = None
+                print(f"Error initializing Gemini client: {e}")
+                self.client_ai = None
         else:
-            self.model = None
+            self.client_ai = None
 
     def get_market_info(self, condition_id):
         """Fetch market question and volume from Gamma API."""
@@ -56,7 +52,6 @@ class PolymarketInsiderAgent:
                 data = response.json()
                 if data:
                     market = data[0]
-                    # Note: volume24hr is used as a proxy for daily avg volume
                     daily_vol = float(market.get('volume24hr', 0) or 0)
                     info = {
                         'question': market.get('question', 'Unknown Question'),
@@ -105,8 +100,8 @@ class PolymarketInsiderAgent:
             print(f"[Discord] Error sending Discord notification: {e}")
 
     def analyze_with_gemini(self, alert_data, retries=2):
-        """Use Gemini 2.0 to perform search-grounded forensic analysis."""
-        if not self.model:
+        """Use Gemini 2.0 with search grounding for forensic analysis."""
+        if not self.client_ai:
             print("[AI Analysis] Gemini API Key not configured. Skipping.")
             return None
 
@@ -126,9 +121,18 @@ class PolymarketInsiderAgent:
         """
 
         print(f"[AI Analysis] Sending trade {alert_data['id']} to Gemini 2.0 for Search Grounding...")
+
+        # Configure search tool in the new SDK
+        search_tool = types.Tool(google_search=types.GoogleSearch())
+
         for attempt in range(retries + 1):
             try:
-                response = self.model.generate_content(prompt)
+                response = self.client_ai.models.generate_content(
+                    model=self.model_id,
+                    contents=prompt,
+                    config=types.GenerateContentConfig(tools=[search_tool])
+                )
+
                 text = response.text
                 start, end = text.find('{'), text.rfind('}') + 1
                 if start != -1 and end != -1:
@@ -143,7 +147,6 @@ class PolymarketInsiderAgent:
 
     def process_trade(self, trade):
         """Analyze a single trade for thresholds and price impact."""
-        # Mapping fields from Data API /trades response
         tx_hash = trade.get('transactionHash')
         condition_id = trade.get('conditionId')
         timestamp = float(trade.get('timestamp', time.time()))
@@ -165,7 +168,7 @@ class PolymarketInsiderAgent:
         while history and float(history[0].get('timestamp', 0)) < (timestamp - WINDOW_SECONDS):
             history.popleft()
 
-        # Criteria: Value > $50k AND Price Shift > 10% in 5 mins AND <$5k low vol market
+        # Detection Logic: Value > $50k AND Price Shift > 10% in 5 mins AND <$5k low vol market
         if value_usd > TRADE_VALUE_THRESHOLD:
             if len(history) > 1:
                 initial_price = float(history[0].get('price', 0))
@@ -198,7 +201,6 @@ class PolymarketInsiderAgent:
                 response = requests.get(f"{DATA_API_ENDPOINT}/trades")
                 if response.status_code == 200:
                     trades = response.json()
-                    # Data API returns list of trades, sort by timestamp
                     trades.sort(key=lambda x: x.get('timestamp', 0))
                     for trade in trades:
                         self.process_trade(trade)
