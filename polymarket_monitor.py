@@ -3,22 +3,20 @@ import json
 import requests
 import os
 from collections import deque
-from py_clob_client.client import ClobClient
-from py_clob_client.constants import POLYGON
-import google.generativeai as genai
 from dotenv import load_dotenv
+import google.generativeai as genai
 
 # Load environment variables from .env
 load_dotenv()
 
 # Configuration - Thresholds from latest request
-CLOB_ENDPOINT = "https://clob.polymarket.com"
+DATA_API_ENDPOINT = "https://data-api.polymarket.com"
 GAMMA_API_ENDPOINT = "https://gamma-api.polymarket.com"
 LOW_VOLUME_THRESHOLD = 5000  # daily avg volume
 TRADE_VALUE_THRESHOLD = 50000 # $50,000
 PRICE_SHIFT_THRESHOLD = 0.10 # 10%
 WINDOW_SECONDS = 300 # 5 minutes
-POLL_INTERVAL = 15
+POLL_INTERVAL = 30 # Polling interval in seconds
 
 # API Configuration
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
@@ -28,12 +26,10 @@ if GEMINI_API_KEY:
     genai.configure(api_key=GEMINI_API_KEY)
 
 class PolymarketInsiderAgent:
-    def __init__(self, api_key=None, secret=None, passphrase=None):
-        # Public data access
-        self.client = ClobClient(CLOB_ENDPOINT, POLYGON)
-        self.processed_trades = {} # map trade_id -> timestamp for pruning
+    def __init__(self):
+        self.processed_trade_hashes = {} # map tx_hash -> timestamp for pruning
         self.market_cache = {}
-        self.trade_history = {} # condition_id -> deque of trades within 5 min window
+        self.trade_history = {} # conditionId -> deque of trades within 5 min window
 
         # Initialize Gemini 2.0 model with Google Search tool
         if GEMINI_API_KEY:
@@ -60,6 +56,7 @@ class PolymarketInsiderAgent:
                 data = response.json()
                 if data:
                     market = data[0]
+                    # Note: volume24hr is used as a proxy for daily avg volume
                     daily_vol = float(market.get('volume24hr', 0) or 0)
                     info = {
                         'question': market.get('question', 'Unknown Question'),
@@ -72,7 +69,7 @@ class PolymarketInsiderAgent:
         return None
 
     def send_discord_notification(self, alert_data, analysis):
-        """Send a notification to a Discord webhook if the score is high."""
+        """Send a notification to a Discord webhook if a trade is flagged."""
         if not DISCORD_WEBHOOK_URL:
             print("[Discord] No webhook URL configured. Skipping notification.")
             return
@@ -83,16 +80,17 @@ class PolymarketInsiderAgent:
         payload = {
             "embeds": [{
                 "title": label,
+                "description": f"Forensic analysis of a large trade on **{alert_data['market_question']}**.",
                 "color": 15158332 if score > 80 else 15844367, # Red or Yellow
                 "fields": [
-                    {"name": "Market", "value": alert_data['market_question'], "inline": False},
                     {"name": "Insider Probability Score", "value": f"**{score}/100**", "inline": True},
                     {"name": "Trade Value", "value": f"${alert_data['value_usd']:.2f}", "inline": True},
                     {"name": "Price Shift", "value": alert_data['price_shift'], "inline": True},
-                    {"name": "Daily Volume", "value": f"${alert_data['daily_volume']:.2f}", "inline": True},
+                    {"name": "Daily Market Volume", "value": f"${alert_data['daily_volume']:.2f}", "inline": True},
                     {"name": "Wallet Address", "value": f"`{alert_data['wallet_address']}`", "inline": False},
                     {"name": "Reasoning", "value": analysis.get('reasoning', 'No reasoning provided.'), "inline": False}
                 ],
+                "footer": {"text": f"Transaction: {alert_data['id']}"},
                 "timestamp": time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime(float(alert_data['timestamp'])))
             }]
         }
@@ -104,7 +102,7 @@ class PolymarketInsiderAgent:
             else:
                 print(f"[Discord] Error sending notification: {response.status_code}")
         except Exception as e:
-            print(f"[Discord] Error: {e}")
+            print(f"[Discord] Error sending Discord notification: {e}")
 
     def analyze_with_gemini(self, alert_data, retries=2):
         """Use Gemini 2.0 to perform search-grounded forensic analysis."""
@@ -127,7 +125,7 @@ class PolymarketInsiderAgent:
         IMPORTANT: Your entire response must be a single valid JSON object.
         """
 
-        print(f"[AI Analysis] Sending trade {alert_data['id']} to Gemini 2.0 for Reasoning...")
+        print(f"[AI Analysis] Sending trade {alert_data['id']} to Gemini 2.0 for Search Grounding...")
         for attempt in range(retries + 1):
             try:
                 response = self.model.generate_content(prompt)
@@ -135,6 +133,7 @@ class PolymarketInsiderAgent:
                 start, end = text.find('{'), text.rfind('}') + 1
                 if start != -1 and end != -1:
                     analysis = json.loads(text[start:end])
+                    print(f"Gemini Analysis for {alert_data['id']}: Score {analysis.get('insider_probability_score', 0)}/100")
                     self.send_discord_notification(alert_data, analysis)
                     return analysis
             except Exception as e:
@@ -144,45 +143,47 @@ class PolymarketInsiderAgent:
 
     def process_trade(self, trade):
         """Analyze a single trade for thresholds and price impact."""
-        trade_id, condition_id = trade.get('id'), trade.get('condition_id')
+        # Mapping fields from Data API /trades response
+        tx_hash = trade.get('transactionHash')
+        condition_id = trade.get('conditionId')
         timestamp = float(trade.get('timestamp', time.time()))
-        price, size = float(trade.get('price')), float(trade.get('size'))
+        price = float(trade.get('price', 0))
+        size = float(trade.get('size', 0))
         value_usd = size * price
 
-        if trade_id in self.processed_trades: return
-        self.processed_trades[trade_id] = timestamp
+        if not tx_hash or not condition_id: return
+        if tx_hash in self.processed_trade_hashes: return
+        self.processed_trade_hashes[tx_hash] = timestamp
 
-        if condition_id not in self.trade_history: self.trade_history[condition_id] = deque()
+        if condition_id not in self.trade_history:
+            self.trade_history[condition_id] = deque()
+
         history = self.trade_history[condition_id]
-
-        # Immediate impact calculation
-        previous_price = history[-1].get('price') if history else None
         history.append(trade)
+
+        # Prune window
         while history and float(history[0].get('timestamp', 0)) < (timestamp - WINDOW_SECONDS):
             history.popleft()
 
-        # Criteria: Value > $50k AND (Daily Vol < $5k OR Price Shift > 10%)
-        # Note: We'll flag any $50k trade with >10% shift within 5 minutes.
+        # Criteria: Value > $50k AND Price Shift > 10% in 5 mins AND <$5k low vol market
         if value_usd > TRADE_VALUE_THRESHOLD:
-            # Shift within 5 minutes
             if len(history) > 1:
-                initial_price = float(history[0].get('price'))
+                initial_price = float(history[0].get('price', 0))
                 price_shift = abs(price - initial_price) / initial_price if initial_price else 0
 
                 if price_shift > PRICE_SHIFT_THRESHOLD:
                     market_info = self.get_market_info(condition_id)
-                    # Include LOW_VOLUME check as an additional "insider" signal
                     if market_info and market_info['daily_volume'] < LOW_VOLUME_THRESHOLD:
                         self.trigger_alert(trade, market_info, price_shift)
 
     def trigger_alert(self, trade, market_info, price_shift):
         """Extract info and alert."""
         alert_data = {
-            'id': trade.get('id'),
-            'wallet_address': trade.get('maker_address') or trade.get('taker_address'),
+            'id': trade.get('transactionHash'),
+            'wallet_address': trade.get('proxyWallet', 'Unknown'),
             'market_question': market_info['question'],
             'timestamp': trade.get('timestamp'),
-            'value_usd': float(trade.get('size')) * float(trade.get('price')),
+            'value_usd': float(trade.get('size', 0)) * float(trade.get('price', 0)),
             'price_shift': f"{price_shift*100:.2f}%",
             'daily_volume': market_info['daily_volume']
         }
@@ -190,14 +191,23 @@ class PolymarketInsiderAgent:
         self.analyze_with_gemini(alert_data)
 
     def monitor(self):
-        """Functional monitoring loop using Polymarket CLOB SDK."""
-        print(f"Polymarket Monitoring Agent Started. Thresholds: >${TRADE_VALUE_THRESHOLD} trade, >{PRICE_SHIFT_THRESHOLD*100}% shift.")
+        """Functional monitoring loop using Polymarket Data API."""
+        print(f"Polymarket Monitoring Agent Started. Polling global trades...")
         while True:
             try:
-                # Actual data ingestion would fetch trades here (e.g. self.client.get_trades())
+                response = requests.get(f"{DATA_API_ENDPOINT}/trades")
+                if response.status_code == 200:
+                    trades = response.json()
+                    # Data API returns list of trades, sort by timestamp
+                    trades.sort(key=lambda x: x.get('timestamp', 0))
+                    for trade in trades:
+                        self.process_trade(trade)
+
+                # Cleanup state
                 now = time.time()
-                stale_ids = [tid for tid, ts in self.processed_trades.items() if ts < (now - 3600)]
-                for tid in stale_ids: del self.processed_trades[tid]
+                stale_hashes = [h for h, ts in self.processed_trade_hashes.items() if ts < (now - 3600)]
+                for h in stale_hashes: del self.processed_trade_hashes[h]
+
                 time.sleep(POLL_INTERVAL)
             except KeyboardInterrupt: break
             except Exception as e:
