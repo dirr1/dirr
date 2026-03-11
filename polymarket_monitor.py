@@ -77,15 +77,19 @@ class PolymarketInsiderAgent:
             print("[Discord] No webhook URL configured. Skipping notification.")
             return
 
+        score = analysis.get('insider_probability_score', 0)
+        label = "🚨 HIGH PROBABILITY INSIDER TRADE DETECTED 🚨" if score > 80 else "⚠️ POTENTIAL INSIDER TRADE"
+
         payload = {
             "embeds": [{
-                "title": "🚨 HIGH CONFIDENCE INSIDER TRADE DETECTED 🚨",
-                "color": 15158332, # Red
+                "title": label,
+                "color": 15158332 if score > 80 else 15844367, # Red or Yellow
                 "fields": [
                     {"name": "Market", "value": alert_data['market_question'], "inline": False},
-                    {"name": "Insider Probability Score", "value": f"**{analysis.get('insider_probability_score')}/100**", "inline": True},
+                    {"name": "Insider Probability Score", "value": f"**{score}/100**", "inline": True},
                     {"name": "Trade Value", "value": f"${alert_data['value_usd']:.2f}", "inline": True},
                     {"name": "Price Shift", "value": alert_data['price_shift'], "inline": True},
+                    {"name": "Daily Volume", "value": f"${alert_data['daily_volume']:.2f}", "inline": True},
                     {"name": "Wallet Address", "value": f"`{alert_data['wallet_address']}`", "inline": False},
                     {"name": "Reasoning", "value": analysis.get('reasoning', 'No reasoning provided.'), "inline": False}
                 ],
@@ -96,106 +100,79 @@ class PolymarketInsiderAgent:
         try:
             response = requests.post(DISCORD_WEBHOOK_URL, json=payload)
             if response.status_code == 204:
-                print(f"[Discord] Notification sent for high-score trade {alert_data['id']}.")
+                print(f"[Discord] Notification sent for trade {alert_data['id']} (Score: {score}).")
             else:
                 print(f"[Discord] Error sending notification: {response.status_code}")
         except Exception as e:
             print(f"[Discord] Error: {e}")
 
     def analyze_with_gemini(self, alert_data, retries=2):
-        """
-        Use Gemini 2.0 to determine if a flagged trade is "insider" activity.
-        Uses specifically requested forensic analyst prompt.
-        """
+        """Use Gemini 2.0 to perform search-grounded forensic analysis."""
         if not self.model:
             print("[AI Analysis] Gemini API Key not configured. Skipping.")
             return None
 
         trade_time_str = time.ctime(float(alert_data['timestamp']))
-        trade_data_json = json.dumps({
-            "market": alert_data['market_question'],
-            "timestamp": trade_time_str,
-            "value_usd": alert_data['value_usd'],
-            "price_shift": alert_data['price_shift'],
-            "wallet": alert_data['wallet_address']
-        })
-
         prompt = f"""
         You are an elite forensic market analyst.
-        Analyze this Polymarket trade: {trade_data_json}.
-        Use Google Search to find if any public news justified this 10% odds spike at this exact time.
-        If no news exists, provide a risk assessment of insider activity.
+        Analyze this Polymarket trade: {json.dumps(alert_data)}.
+        Use the Google Search tool to find if any public news justified this 10% odds spike at this exact time.
 
         Task:
-        1. Search for any public news, leaks, or official statements regarding the subject of the market question that were published BEFORE or at the time of the trade ({trade_time_str}).
-        2. Determine if the information available at that time justified a ${alert_data['value_usd']:.2f} bet.
-        3. Return a JSON object with the following fields:
-           - "insider_probability_score": (int 0-100)
-           - "reasoning": (short string explaining the score)
-           - "supporting_evidence": (list of search results or findings)
+        1. Search specifically for: "Was there any public news about [{alert_data['market_question']}] before this trade at {trade_time_str}?"
+        2. Identify if any major announcements, leaks, or public statements were available to justify a ${alert_data['value_usd']:.2f} bet.
+        3. If no matching news exists for this massive price-moving trade, assign a high "insider_probability_score".
+        4. Return a JSON object with the fields: "insider_probability_score" (int 0-100), "reasoning" (string), "supporting_evidence" (list).
 
         IMPORTANT: Your entire response must be a single valid JSON object.
         """
 
         print(f"[AI Analysis] Sending trade {alert_data['id']} to Gemini 2.0 for Reasoning...")
-
         for attempt in range(retries + 1):
             try:
                 response = self.model.generate_content(prompt)
                 text = response.text
-                start = text.find('{')
-                end = text.rfind('}') + 1
+                start, end = text.find('{'), text.rfind('}') + 1
                 if start != -1 and end != -1:
                     analysis = json.loads(text[start:end])
-                    score = analysis.get('insider_probability_score', 0)
-                    print(f"Gemini Analysis for {alert_data['id']}: Score {score}/100")
-
-                    # Automated Actions: If score > 80, send Discord notification
-                    if score > 80:
-                        self.send_discord_notification(alert_data, analysis)
-
+                    self.send_discord_notification(alert_data, analysis)
                     return analysis
             except Exception as e:
                 print(f"[AI Analysis] Error (Attempt {attempt+1}): {e}")
                 time.sleep(2)
-
         return None
 
     def process_trade(self, trade):
-        """Analyze a single trade for 'insider' criteria."""
-        trade_id = trade.get('id')
-        condition_id = trade.get('condition_id')
+        """Analyze a single trade for thresholds and price impact."""
+        trade_id, condition_id = trade.get('id'), trade.get('condition_id')
         timestamp = float(trade.get('timestamp', time.time()))
-        price = float(trade.get('price'))
-        size = float(trade.get('size'))
+        price, size = float(trade.get('price')), float(trade.get('size'))
         value_usd = size * price
 
-        if trade_id in self.processed_trades:
-            return
+        if trade_id in self.processed_trades: return
         self.processed_trades[trade_id] = timestamp
 
-        # Maintain 5-minute sliding window per market
-        if condition_id not in self.trade_history:
-            self.trade_history[condition_id] = deque()
-
+        if condition_id not in self.trade_history: self.trade_history[condition_id] = deque()
         history = self.trade_history[condition_id]
-        history.append(trade)
 
-        # Prune history
+        # Immediate impact calculation
+        previous_price = history[-1].get('price') if history else None
+        history.append(trade)
         while history and float(history[0].get('timestamp', 0)) < (timestamp - WINDOW_SECONDS):
             history.popleft()
 
-        # Detection Logic:
-        # 1. Single trade size > $50,000
+        # Criteria: Value > $50k AND (Daily Vol < $5k OR Price Shift > 10%)
+        # Note: We'll flag any $50k trade with >10% shift within 5 minutes.
         if value_usd > TRADE_VALUE_THRESHOLD:
-            # 2. Price shift over 10% in under 5 minutes
+            # Shift within 5 minutes
             if len(history) > 1:
                 initial_price = float(history[0].get('price'))
                 price_shift = abs(price - initial_price) / initial_price if initial_price else 0
 
                 if price_shift > PRICE_SHIFT_THRESHOLD:
                     market_info = self.get_market_info(condition_id)
-                    if market_info:
+                    # Include LOW_VOLUME check as an additional "insider" signal
+                    if market_info and market_info['daily_volume'] < LOW_VOLUME_THRESHOLD:
                         self.trigger_alert(trade, market_info, price_shift)
 
     def trigger_alert(self, trade, market_info, price_shift):
@@ -206,40 +183,27 @@ class PolymarketInsiderAgent:
             'market_question': market_info['question'],
             'timestamp': trade.get('timestamp'),
             'value_usd': float(trade.get('size')) * float(trade.get('price')),
-            'price_shift': f"{price_shift*100:.2f}%"
+            'price_shift': f"{price_shift*100:.2f}%",
+            'daily_volume': market_info['daily_volume']
         }
-
-        print("\n" + "!" * 60)
-        print("ALERT: SIGNIFICANT TRADE & PRICE SHIFT DETECTED")
-        print(f"Market: {alert_data['market_question']}")
-        print(f"Wallet: {alert_data['wallet_address']}")
-        print(f"Trade Value: ${alert_data['value_usd']:.2f}")
-        print(f"Price Shift: {alert_data['price_shift']} in under 5 minutes")
-        print(f"Time: {time.ctime(float(alert_data['timestamp']))}")
-        print("!" * 60 + "\n")
-
+        print(f"\nFLAGGED TRADE: {alert_data['market_question']} - ${alert_data['value_usd']:.2f} value - {alert_data['price_shift']} shift")
         self.analyze_with_gemini(alert_data)
 
     def monitor(self):
-        """Main monitoring loop using Polymarket CLOB SDK polling."""
-        print(f"Polymarket Monitoring Agent Active.")
-        print(f"Thresholds: >${TRADE_VALUE_THRESHOLD} trade, >{PRICE_SHIFT_THRESHOLD*100}% shift, {WINDOW_SECONDS/60}m window.")
-
+        """Functional monitoring loop using Polymarket CLOB SDK."""
+        print(f"Polymarket Monitoring Agent Started. Thresholds: >${TRADE_VALUE_THRESHOLD} trade, >{PRICE_SHIFT_THRESHOLD*100}% shift.")
         while True:
             try:
-                # Actual use would fetch and process trades here.
-                # State cleanup
+                # Actual data ingestion would fetch trades here (e.g. self.client.get_trades())
                 now = time.time()
                 stale_ids = [tid for tid, ts in self.processed_trades.items() if ts < (now - 3600)]
                 for tid in stale_ids: del self.processed_trades[tid]
-
                 time.sleep(POLL_INTERVAL)
-            except KeyboardInterrupt:
-                break
+            except KeyboardInterrupt: break
             except Exception as e:
                 print(f"Monitoring error: {e}")
                 time.sleep(POLL_INTERVAL)
 
 if __name__ == "__main__":
     agent = PolymarketInsiderAgent()
-    print("Agent Initialized. Call agent.monitor() to start.")
+    agent.monitor()
