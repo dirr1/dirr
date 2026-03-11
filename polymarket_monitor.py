@@ -10,19 +10,22 @@ from google.genai import types
 # Load environment variables from .env
 load_dotenv()
 
-# Configuration - Thresholds from latest request
+# Configuration - Optimized for high throughput
 DATA_API_ENDPOINT = "https://data-api.polymarket.com"
 GAMMA_API_ENDPOINT = "https://gamma-api.polymarket.com"
 LOW_VOLUME_THRESHOLD = 5000  # daily avg volume
 TRADE_VALUE_THRESHOLD = 50000 # $50,000
 PRICE_SHIFT_THRESHOLD = 0.10 # 10%
 WINDOW_SECONDS = 300 # 5 minutes
-POLL_INTERVAL = 30 # Polling interval in seconds
+POLL_INTERVAL = 2 # Reduced to 2 seconds for high throughput (~180,000 trades/hr)
 HEARTBEAT_INTERVAL = 300 # 5 minutes
 
 # API Configuration
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 DISCORD_WEBHOOK_URL = os.getenv("DISCORD_WEBHOOK_URL")
+
+# In the new google-genai SDK, we don't call genai.configure()
+# Configuration is passed directly to the Client.
 
 class PolymarketInsiderAgent:
     def __init__(self):
@@ -125,7 +128,7 @@ class PolymarketInsiderAgent:
 
         print(f"[AI Analysis] Sending trade {alert_data['id']} to Gemini 2.0 for Search Grounding...")
 
-        # Correct standalone tool declaration in model configuration
+        # standalone tool declaration
         tools = [{'google_search': {}}]
 
         for attempt in range(retries + 1):
@@ -173,7 +176,7 @@ class PolymarketInsiderAgent:
             history.popleft()
 
         # Detection Logic: Value > $50k AND Price Shift > 10% in 5 mins AND <$5k low vol market
-        if value_usd > 10000: # Log any trade > $10k being evaluated
+        if value_usd > 10000: # Log eval for trades > $10k
             print(f"[Evaluate] Trade {tx_hash[:10]}... Value: ${value_usd:,.2f} on {condition_id[:8]}", flush=True)
 
         if value_usd > TRADE_VALUE_THRESHOLD:
@@ -207,10 +210,8 @@ class PolymarketInsiderAgent:
     def monitor(self):
         """Functional monitoring loop using Polymarket Data API."""
         print(f"Polymarket Monitoring Agent Started.")
-        print(f"  Target: Trades > ${TRADE_VALUE_THRESHOLD:,.0f}")
-        print(f"  Market: Daily Volume < ${LOW_VOLUME_THRESHOLD:,.0f}")
-        print(f"  Impact: > {PRICE_SHIFT_THRESHOLD*100}% shift in {WINDOW_SECONDS/60:.0f}m")
-        print(f"  Polling every {POLL_INTERVAL}s...", flush=True)
+        print(f"  Theoretical Capacity: ~180,000 trades/hr (Polling: {POLL_INTERVAL}s)")
+        print(f"  Target: Trades > ${TRADE_VALUE_THRESHOLD:,.0f} | Vol < ${LOW_VOLUME_THRESHOLD:,.0f} | Shift > {PRICE_SHIFT_THRESHOLD*100}%", flush=True)
 
         last_heartbeat = time.time()
 
