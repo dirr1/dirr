@@ -18,6 +18,7 @@ TRADE_VALUE_THRESHOLD = 50000 # $50,000
 PRICE_SHIFT_THRESHOLD = 0.10 # 10%
 WINDOW_SECONDS = 300 # 5 minutes
 POLL_INTERVAL = 30 # Polling interval in seconds
+HEARTBEAT_INTERVAL = 300 # 5 minutes
 
 # API Configuration
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
@@ -28,6 +29,8 @@ class PolymarketInsiderAgent:
         self.processed_trade_hashes = {} # map tx_hash -> timestamp for pruning
         self.market_cache = {}
         self.trade_history = {} # conditionId -> deque of trades within 5 min window
+        self.total_processed_count = 0
+        self.start_time = time.time()
 
         # Initialize the new Google GenAI SDK client
         if GEMINI_API_KEY:
@@ -157,6 +160,7 @@ class PolymarketInsiderAgent:
         if not tx_hash or not condition_id: return
         if tx_hash in self.processed_trade_hashes: return
         self.processed_trade_hashes[tx_hash] = timestamp
+        self.total_processed_count += 1
 
         if condition_id not in self.trade_history:
             self.trade_history[condition_id] = deque()
@@ -169,6 +173,9 @@ class PolymarketInsiderAgent:
             history.popleft()
 
         # Detection Logic: Value > $50k AND Price Shift > 10% in 5 mins AND <$5k low vol market
+        if value_usd > 10000: # Log any trade > $10k being evaluated
+            print(f"[Evaluate] Trade {tx_hash[:10]}... Value: ${value_usd:,.2f} on {condition_id[:8]}", flush=True)
+
         if value_usd > TRADE_VALUE_THRESHOLD:
             if len(history) > 1:
                 initial_price = float(history[0].get('price', 0))
@@ -190,20 +197,45 @@ class PolymarketInsiderAgent:
             'price_shift': f"{price_shift*100:.2f}%",
             'daily_volume': market_info['daily_volume']
         }
-        print(f"\nFLAGGED TRADE: {alert_data['market_question']} - ${alert_data['value_usd']:.2f} value - {alert_data['price_shift']} shift")
+        print(f"\n[ALERT] FLAGGED TRADE DETECTED!")
+        print(f"  Market: {alert_data['market_question']}")
+        print(f"  Value: ${alert_data['value_usd']:,.2f}")
+        print(f"  Shift: {alert_data['price_shift']}")
+        print("-" * 30, flush=True)
         self.analyze_with_gemini(alert_data)
 
     def monitor(self):
         """Functional monitoring loop using Polymarket Data API."""
-        print(f"Polymarket Monitoring Agent Started. Polling global trades...")
+        print(f"Polymarket Monitoring Agent Started.")
+        print(f"  Target: Trades > ${TRADE_VALUE_THRESHOLD:,.0f}")
+        print(f"  Market: Daily Volume < ${LOW_VOLUME_THRESHOLD:,.0f}")
+        print(f"  Impact: > {PRICE_SHIFT_THRESHOLD*100}% shift in {WINDOW_SECONDS/60:.0f}m")
+        print(f"  Polling every {POLL_INTERVAL}s...", flush=True)
+
+        last_heartbeat = time.time()
+
         while True:
             try:
                 response = requests.get(f"{DATA_API_ENDPOINT}/trades")
                 if response.status_code == 200:
                     trades = response.json()
+                    new_count = 0
+                    # Sort to process chronologically
                     trades.sort(key=lambda x: x.get('timestamp', 0))
                     for trade in trades:
-                        self.process_trade(trade)
+                        if trade.get('transactionHash') not in self.processed_trade_hashes:
+                            self.process_trade(trade)
+                            new_count += 1
+
+                    if new_count > 0:
+                        print(f"[{time.strftime('%H:%M:%S')}] Ingested {new_count} new trades.", flush=True)
+
+                # Heartbeat logging
+                now = time.time()
+                if now - last_heartbeat > HEARTBEAT_INTERVAL:
+                    uptime = (now - self.start_time) / 3600
+                    print(f"\n[HEARTBEAT] Agent Uptime: {uptime:.1f}h | Total Trades Analyzed: {self.total_processed_count:,}", flush=True)
+                    last_heartbeat = now
 
                 # Cleanup state
                 now = time.time()
@@ -211,7 +243,9 @@ class PolymarketInsiderAgent:
                 for h in stale_hashes: del self.processed_trade_hashes[h]
 
                 time.sleep(POLL_INTERVAL)
-            except KeyboardInterrupt: break
+            except KeyboardInterrupt:
+                print("\nAgent stopped by user.")
+                break
             except Exception as e:
                 print(f"Monitoring error: {e}")
                 time.sleep(POLL_INTERVAL)
