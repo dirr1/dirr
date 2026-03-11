@@ -122,15 +122,15 @@ class PolymarketInsiderAgent:
 
         print(f"[AI Analysis] Sending trade {alert_data['id']} to Gemini 2.0 for Search Grounding...")
 
-        # Configure search tool in the new SDK
-        search_tool = types.Tool(google_search=types.GoogleSearch())
+        # Correct standalone tool declaration in model configuration
+        tools = [{'google_search': {}}]
 
         for attempt in range(retries + 1):
             try:
                 response = self.client_ai.models.generate_content(
                     model=self.model_id,
                     contents=prompt,
-                    config=types.GenerateContentConfig(tools=[search_tool])
+                    config=types.GenerateContentConfig(tools=tools)
                 )
 
                 text = response.text
