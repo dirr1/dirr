@@ -6,6 +6,10 @@ from collections import deque
 from py_clob_client.client import ClobClient
 from py_clob_client.constants import POLYGON
 import google.generativeai as genai
+from dotenv import load_dotenv
+
+# Load environment variables from .env
+load_dotenv()
 
 # Configuration - Thresholds from latest request
 CLOB_ENDPOINT = "https://clob.polymarket.com"
@@ -16,8 +20,10 @@ PRICE_SHIFT_THRESHOLD = 0.10 # 10%
 WINDOW_SECONDS = 300 # 5 minutes
 POLL_INTERVAL = 15
 
-# Gemini Configuration
-GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
+# API Configuration
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+DISCORD_WEBHOOK_URL = os.getenv("DISCORD_WEBHOOK_URL")
+
 if GEMINI_API_KEY:
     genai.configure(api_key=GEMINI_API_KEY)
 
@@ -65,23 +71,60 @@ class PolymarketInsiderAgent:
             pass
         return None
 
+    def send_discord_notification(self, alert_data, analysis):
+        """Send a notification to a Discord webhook if the score is high."""
+        if not DISCORD_WEBHOOK_URL:
+            print("[Discord] No webhook URL configured. Skipping notification.")
+            return
+
+        payload = {
+            "embeds": [{
+                "title": "🚨 HIGH CONFIDENCE INSIDER TRADE DETECTED 🚨",
+                "color": 15158332, # Red
+                "fields": [
+                    {"name": "Market", "value": alert_data['market_question'], "inline": False},
+                    {"name": "Insider Probability Score", "value": f"**{analysis.get('insider_probability_score')}/100**", "inline": True},
+                    {"name": "Trade Value", "value": f"${alert_data['value_usd']:.2f}", "inline": True},
+                    {"name": "Price Shift", "value": alert_data['price_shift'], "inline": True},
+                    {"name": "Wallet Address", "value": f"`{alert_data['wallet_address']}`", "inline": False},
+                    {"name": "Reasoning", "value": analysis.get('reasoning', 'No reasoning provided.'), "inline": False}
+                ],
+                "timestamp": time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime(float(alert_data['timestamp'])))
+            }]
+        }
+
+        try:
+            response = requests.post(DISCORD_WEBHOOK_URL, json=payload)
+            if response.status_code == 204:
+                print(f"[Discord] Notification sent for high-score trade {alert_data['id']}.")
+            else:
+                print(f"[Discord] Error sending notification: {response.status_code}")
+        except Exception as e:
+            print(f"[Discord] Error: {e}")
+
     def analyze_with_gemini(self, alert_data, retries=2):
         """
         Use Gemini 2.0 to determine if a flagged trade is "insider" activity.
-        Uses Google Search tool to cross-reference with real-world news.
+        Uses specifically requested forensic analyst prompt.
         """
         if not self.model:
-            print("[AI Analysis] Gemini API Key not configured. Skipping analysis.")
+            print("[AI Analysis] Gemini API Key not configured. Skipping.")
             return None
 
         trade_time_str = time.ctime(float(alert_data['timestamp']))
+        trade_data_json = json.dumps({
+            "market": alert_data['market_question'],
+            "timestamp": trade_time_str,
+            "value_usd": alert_data['value_usd'],
+            "price_shift": alert_data['price_shift'],
+            "wallet": alert_data['wallet_address']
+        })
+
         prompt = f"""
-        Analyze the following flagged trade on Polymarket for potential insider activity.
-        Market Question: {alert_data['market_question']}
-        Trade Timestamp: {trade_time_str}
-        Trade Value: ${alert_data['value_usd']:.2f}
-        Price Shift: {alert_data['price_shift']} (in under 5 minutes)
-        Wallet Address: {alert_data['wallet_address']}
+        You are an elite forensic market analyst.
+        Analyze this Polymarket trade: {trade_data_json}.
+        Use Google Search to find if any public news justified this 10% odds spike at this exact time.
+        If no news exists, provide a risk assessment of insider activity.
 
         Task:
         1. Search for any public news, leaks, or official statements regarding the subject of the market question that were published BEFORE or at the time of the trade ({trade_time_str}).
@@ -94,7 +137,7 @@ class PolymarketInsiderAgent:
         IMPORTANT: Your entire response must be a single valid JSON object.
         """
 
-        print(f"[AI Analysis] Sending trade {alert_data['id']} to Gemini 2.0 for reasoning...")
+        print(f"[AI Analysis] Sending trade {alert_data['id']} to Gemini 2.0 for Reasoning...")
 
         for attempt in range(retries + 1):
             try:
@@ -104,9 +147,13 @@ class PolymarketInsiderAgent:
                 end = text.rfind('}') + 1
                 if start != -1 and end != -1:
                     analysis = json.loads(text[start:end])
-                    print(f"Gemini Analysis for {alert_data['id']}:")
-                    print(f"  Score: {analysis.get('insider_probability_score')}/100")
-                    print(f"  Reasoning: {analysis.get('reasoning')}")
+                    score = analysis.get('insider_probability_score', 0)
+                    print(f"Gemini Analysis for {alert_data['id']}: Score {score}/100")
+
+                    # Automated Actions: If score > 80, send Discord notification
+                    if score > 80:
+                        self.send_discord_notification(alert_data, analysis)
+
                     return analysis
             except Exception as e:
                 print(f"[AI Analysis] Error (Attempt {attempt+1}): {e}")
@@ -180,12 +227,7 @@ class PolymarketInsiderAgent:
 
         while True:
             try:
-                # Poll for recent trades across all markets (or specific ones)
-                # Note: This is a conceptual example of the SDK usage.
-                # In a real scenario, you'd iterate over active markets.
-                # trades = self.client.get_trades(limit=100)
-                # for trade in trades: self.process_trade(trade)
-
+                # Actual use would fetch and process trades here.
                 # State cleanup
                 now = time.time()
                 stale_ids = [tid for tid, ts in self.processed_trades.items() if ts < (now - 3600)]
@@ -201,5 +243,3 @@ class PolymarketInsiderAgent:
 if __name__ == "__main__":
     agent = PolymarketInsiderAgent()
     print("Agent Initialized. Call agent.monitor() to start.")
-    # To start monitoring in a real environment:
-    # agent.monitor()
