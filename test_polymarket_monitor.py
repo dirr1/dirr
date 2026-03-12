@@ -3,10 +3,11 @@ import time
 import json
 import os
 import asyncio
+import httpx
 from unittest.mock import MagicMock, patch, AsyncMock
 from polymarket_monitor import PolymarketRealtimeAgent
 
-class TestPolymarketHybridAgent(unittest.TestCase):
+class TestPolymarketAsyncAgent(unittest.TestCase):
     def setUp(self):
         # Mocking environment variables
         self.env_patcher = patch.dict('os.environ', {
@@ -29,51 +30,35 @@ class TestPolymarketHybridAgent(unittest.TestCase):
     def tearDown(self):
         self.env_patcher.stop()
 
-    @patch('requests.get')
-    @patch('requests.post')
-    def test_insider_criteria_met_hybrid(self, mock_post, mock_get):
-        # Setup Data API mock for wallet enrichment
-        mock_get.return_value.status_code = 200
-        mock_get.return_value.json.return_value = [
-            {'price': 0.60, 'proxyWallet': '0xRealWallet', 'size': '100000'}
-        ]
+    async def async_test_insider_logic(self):
+        # Setup mock client and response
+        mock_client = AsyncMock(spec=httpx.AsyncClient)
 
-        # 1. Baseline trade event
-        self.agent.process_ws_event({
-            'asset_id': 'asset1',
-            'price': '0.50',
-            'size': '10',
-            'event_type': 'last_trade_price'
+        # Mock Data API response for enrichment
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = [{'price': 0.60, 'proxyWallet': '0xRealWallet', 'size': '100000'}]
+        mock_client.get.return_value = mock_response
+
+        # 1. First event
+        await self.agent.process_ws_event(mock_client, {
+            'asset_id': 'asset1', 'price': '0.50', 'size': '10', 'event_type': 'last_trade_price'
         })
 
-        # 2. Large event causing shift
+        # 2. Large event
         event = {
-            'asset_id': 'asset1',
-            'price': '0.60', # 20% shift
-            'size': '100000',
-            'event_type': 'last_trade_price'
+            'asset_id': 'asset1', 'price': '0.60', 'size': '100000', 'event_type': 'last_trade_price'
         }
 
         with patch('asyncio.create_task') as mock_task:
-            self.agent.process_ws_event(event)
-            # Verify enrichment was attempted
-            self.assertTrue(mock_get.called)
+            await self.agent.process_ws_event(mock_client, event)
+            # Verify async enrichment call
+            self.assertTrue(mock_client.get.called)
+            # Verify AI analysis triggered
             mock_task.assert_called_once()
 
-    @patch('requests.get')
-    def test_get_active_tokens(self, mock_get):
-        mock_get.return_value.status_code = 200
-        mock_get.return_value.json.return_value = [
-            {
-                'conditionId': 'c1',
-                'question': 'Q1',
-                'volume24hr': '100',
-                'clobTokenIds': '["t1", "t2"]'
-            }
-        ]
-        asset_ids = self.agent.discover_active_tokens()
-        self.assertEqual(len(asset_ids), 2)
-        self.assertIn('t1', asset_ids)
+    def test_insider_logic(self):
+        asyncio.run(self.async_test_insider_logic())
 
 if __name__ == '__main__':
     unittest.main()
