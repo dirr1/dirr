@@ -1,0 +1,19 @@
+version: '3.8'
+
+services:
+  tracker:
+    build: .
+    container_name: polymarket-tracker
+    restart: unless-stopped
+    volumes:
+      - ./data:/app/data
+      - ./.env:/app/.env:ro
+    environment:
+      - DATABASE_PATH=/app/data/polymarket_tracker.db
+      - LOG_FILE=/app/data/tracker.log
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
