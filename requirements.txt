@@ -1,4 +1,4 @@
 google-genai
 requests
 python-dotenv
-py-clob-client
+websockets
