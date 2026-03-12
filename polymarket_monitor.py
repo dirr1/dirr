@@ -2,6 +2,8 @@ import time
 import json
 import requests
 import os
+import random
+import concurrent.futures
 from collections import deque, OrderedDict
 from dotenv import load_dotenv
 from google import genai
@@ -10,15 +12,15 @@ from google.genai import types
 # Load environment variables from .env
 load_dotenv()
 
-# Configuration - Optimized for max real-time visibility and throughput
+# Configuration - Optimized for max throughput and cache-bypassing
 DATA_API_ENDPOINT = "https://data-api.polymarket.com"
 GAMMA_API_ENDPOINT = "https://gamma-api.polymarket.com"
 LOW_VOLUME_THRESHOLD = 5000  # daily avg volume
 TRADE_VALUE_THRESHOLD = 50000 # $50,000
 PRICE_SHIFT_THRESHOLD = 0.10 # 10%
 WINDOW_SECONDS = 300 # 5 minutes
-POLL_INTERVAL = 1 # 1 second frequency for near-real-time coverage
-HEARTBEAT_INTERVAL = 300 # 5 minutes report
+POLL_INTERVAL = 1 # 1 second frequency
+HEARTBEAT_INTERVAL = 300 # 5 minutes stats
 HASH_RETENTION_LIMIT = 50000 # LRU cache size
 
 # API Configuration
@@ -29,11 +31,14 @@ class PolymarketInsiderAgent:
     def __init__(self):
         self.processed_trade_hashes = OrderedDict()
         self.market_cache = {}
-        self.trade_history = {} # conditionId -> deque of trades
+        self.last_prices = {} # conditionId -> last seen price
         self.total_processed_count = 0
         self.last_minute_count = 0
         self.last_minute_time = time.time()
         self.start_time = time.time()
+
+        # Thread pool for non-blocking AI analysis and notifications
+        self.executor = concurrent.futures.ThreadPoolExecutor(max_workers=5)
 
         # Initialize Gemini 2.0 Client (Modern SDK)
         if GEMINI_API_KEY:
@@ -60,7 +65,7 @@ class PolymarketInsiderAgent:
                     market = data[0]
                     daily_vol = float(market.get('volume24hr', 0) or 0)
                     info = {
-                        'question': market.get('question', 'Unknown'),
+                        'question': market.get('question', 'Unknown Question'),
                         'daily_volume': daily_vol
                     }
                     self.market_cache[condition_id] = info
@@ -70,7 +75,7 @@ class PolymarketInsiderAgent:
         return None
 
     def send_discord_notification(self, alert_data, analysis):
-        """Send a notification to a Discord webhook if a trade is flagged."""
+        """Send a notification to a Discord webhook."""
         if not DISCORD_WEBHOOK_URL:
             return
 
@@ -80,17 +85,18 @@ class PolymarketInsiderAgent:
         payload = {
             "embeds": [{
                 "title": label,
+                "description": f"Forensic analysis of a large trade on **{alert_data['market_question']}**.",
                 "color": 15158332 if score > 80 else 15844367,
                 "fields": [
-                    {"name": "Insider Score", "value": f"**{score}/100**", "inline": True},
+                    {"name": "Insider Probability Score", "value": f"**{score}/100**", "inline": True},
                     {"name": "Trade Value", "value": f"${alert_data['value_usd']:,.2f}", "inline": True},
                     {"name": "Price Shift", "value": alert_data['price_shift'], "inline": True},
                     {"name": "Daily Volume", "value": f"${alert_data['daily_volume']:,.2f}", "inline": True},
-                    {"name": "Wallet", "value": f"`{alert_data['wallet_address']}`", "inline": False},
+                    {"name": "Wallet Address", "value": f"`{alert_data['wallet_address']}`", "inline": False},
                     {"name": "Reasoning", "value": analysis.get('reasoning', 'No reasoning provided.'), "inline": False}
                 ],
-                "footer": {"text": f"Market: {alert_data['market_question']}"},
-                "timestamp": time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime(alert_data['timestamp']))
+                "footer": {"text": f"Transaction: {alert_data['id']}"},
+                "timestamp": time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime(float(alert_data['timestamp'])))
             }]
         }
 
@@ -111,7 +117,7 @@ class PolymarketInsiderAgent:
         Use the Google Search tool to find if any public news justified this 10% odds spike at this exact time ({trade_time_str}).
         1. Search specifically for news published BEFORE the trade.
         2. If no news exists, assign a high "insider_probability_score".
-        3. Return a JSON object with: "insider_probability_score" (int 0-100), "reasoning", "supporting_evidence".
+        3. Return a JSON object with: "insider_probability_score" (int 0-100), "reasoning" (string), "supporting_evidence" (list).
 
         IMPORTANT: Your entire response must be a single valid JSON object.
         """
@@ -155,46 +161,47 @@ class PolymarketInsiderAgent:
         if len(self.processed_trade_hashes) > HASH_RETENTION_LIMIT:
             self.processed_trade_hashes.popitem(last=False)
 
-        if condition_id not in self.trade_history:
-            self.trade_history[condition_id] = deque()
-        history = self.trade_history[condition_id]
-
-        history.append({'price': price, 'timestamp': timestamp})
-        while history and history[0]['timestamp'] < (timestamp - WINDOW_SECONDS):
-            history.popleft()
-
-        # Alert Logic
-        if value_usd > TRADE_VALUE_THRESHOLD and len(history) > 1:
-            initial_price = history[0]['price']
-            shift = abs(price - initial_price) / initial_price if initial_price else 0
+        # Detection Logic: Compare against last known price
+        # This handles low-volume markets where trades are > 5 mins apart.
+        # A single trade "causes" the shift from the previous state.
+        last_price = self.last_prices.get(condition_id)
+        if last_price and value_usd > TRADE_VALUE_THRESHOLD:
+            shift = abs(price - last_price) / last_price if last_price else 0
 
             if shift > PRICE_SHIFT_THRESHOLD:
-                m_info = self.get_market_info(condition_id)
-                if m_info and m_info['daily_volume'] < LOW_VOLUME_THRESHOLD:
+                market_info = self.get_market_info(condition_id)
+                if market_info and market_info['daily_volume'] < LOW_VOLUME_THRESHOLD:
                     alert_data = {
                         'id': tx_hash,
                         'wallet_address': trade.get('proxyWallet', 'Unknown'),
-                        'market_question': m_info['question'],
+                        'market_question': market_info['question'],
                         'timestamp': timestamp,
                         'value_usd': value_usd,
                         'price_shift': f"{shift*100:.2f}%",
-                        'daily_volume': m_info['daily_volume']
+                        'daily_volume': market_info['daily_volume']
                     }
                     print(f"\n[ALERT] FLAGGED TRADE DETECTED! Value: ${value_usd:,.2f} | Shift: {alert_data['price_shift']}")
-                    self.analyze_with_gemini(alert_data)
+                    # Run analysis in background thread to avoid blocking ingestion
+                    self.executor.submit(self.analyze_with_gemini, alert_data)
+
+        # Update state for next comparison
+        self.last_prices[condition_id] = price
 
     def monitor(self):
-        """Near-real-time polling loop using Polymarket Data API."""
-        print(f"Polymarket Monitoring Agent Started (Polling Mode).")
-        print(f"  Configuration: Trades > ${TRADE_VALUE_THRESHOLD:,.0f} | Shift > {PRICE_SHIFT_THRESHOLD*100}%")
-        print(f"  Polling frequency: {POLL_INTERVAL}s | Capacity: ~1.8M trades/hr")
+        """High-frequency polling loop with cache-busting nonces."""
+        print(f"Polymarket Monitoring Agent Started (Near-Real-Time Mode).")
+        print(f"  Configuration: Value > ${TRADE_VALUE_THRESHOLD:,.0f} | Shift > {PRICE_SHIFT_THRESHOLD*100}%")
+        print(f"  Bypassing CDN Cache with random nonces...")
 
         last_heartbeat = time.time()
 
         while True:
             try:
-                # Capture all trades in the interval with limit=500
-                response = requests.get(f"{DATA_API_ENDPOINT}/trades?limit=500", timeout=10)
+                # Add nonce to bypass CDN cache
+                nonce = random.randint(100000, 999999)
+                url = f"{DATA_API_ENDPOINT}/trades?limit=500&nonce={nonce}"
+                response = requests.get(url, timeout=10)
+
                 if response.status_code == 200:
                     trades = response.json()
                     new_count = 0
@@ -206,18 +213,19 @@ class PolymarketInsiderAgent:
 
                     # Real-time feedback ticker
                     t_str = time.strftime('%H:%M:%S')
-                    print(f"[{t_str}] Polled: {len(trades)} | New: {new_count} | Total Analyzed: {self.total_processed_count}", end='\r', flush=True)
+                    print(f"[{t_str}] Ingested: {len(trades)} | New: {new_count} | Total Analyzed: {self.total_processed_count}", end='\r', flush=True)
 
                 now = time.time()
                 # Rate summary every minute
                 if now - self.last_minute_time > 60:
                     rate = self.last_minute_count / ((now - self.last_minute_time)/60)
-                    print(f"\n[{time.strftime('%H:%M:%S')}] Throughput: {rate:.1f} trades/min")
+                    print(f"\n[{time.strftime('%H:%M:%S')}] Current Throughput: {rate:.1f} trades/min")
                     self.last_minute_count = 0
                     self.last_minute_time = now
 
                 if now - last_heartbeat > HEARTBEAT_INTERVAL:
-                    print(f"\n[HEARTBEAT] Uptime: {(now-self.start_time)/3600:.1f}h | Unique Hashes: {len(self.processed_trade_hashes)}")
+                    uptime = (now - self.start_time) / 3600
+                    print(f"\n[HEARTBEAT] Uptime: {uptime:.1f}h | Unique Trade Hashes tracked: {len(self.processed_trade_hashes)}", flush=True)
                     last_heartbeat = now
 
                 time.sleep(POLL_INTERVAL)

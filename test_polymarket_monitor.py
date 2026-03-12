@@ -34,13 +34,13 @@ class TestPolymarketInsiderAgent(unittest.TestCase):
         mock_response.text = '{"insider_probability_score": 95, "reasoning": "Suspicious.", "supporting_evidence": []}'
         self.mock_client.models.generate_content.return_value = mock_response
 
-        # 1. Baseline trade 4 mins ago
+        # 1. Baseline trade (even much earlier than 5 mins ago)
         self.agent.process_trade({
             'transactionHash': 'tx0',
             'conditionId': 'cond1',
             'price': '0.50',
             'size': '10',
-            'timestamp': str(time.time() - 240)
+            'timestamp': str(time.time() - 3600) # 1 hour ago
         })
 
         # 2. Large trade ($60,000) causing 20% shift
@@ -53,10 +53,21 @@ class TestPolymarketInsiderAgent(unittest.TestCase):
             'timestamp': str(time.time())
         }
 
-        with patch.object(self.agent, 'analyze_with_gemini', wraps=self.agent.analyze_with_gemini) as mock_analyze:
+        # Use a wrapper to track calls but also allow thread execution
+        with patch.object(self.agent, 'analyze_with_gemini', side_effect=self.agent.analyze_with_gemini) as mock_analyze:
             self.agent.process_trade(trade)
+
+            # Wait for background thread
+            timeout = 5
+            start = time.time()
+            while mock_analyze.call_count == 0 and (time.time() - start) < timeout:
+                time.sleep(0.1)
+
             mock_analyze.assert_called_once()
-            # Verify alerting
+
+            # Also verify discord post was called
+            while mock_post.call_count == 0 and (time.time() - start) < timeout:
+                time.sleep(0.1)
             mock_post.assert_called_once()
 
     @patch('requests.post')
