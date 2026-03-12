@@ -2,7 +2,9 @@ import time
 import json
 import requests
 import os
-from collections import deque, OrderedDict
+import asyncio
+import websockets
+from collections import deque
 from dotenv import load_dotenv
 from google import genai
 from google.genai import types
@@ -10,35 +12,31 @@ from google.genai import types
 # Load environment variables from .env
 load_dotenv()
 
-# Configuration - Optimized for max throughput and visibility
-DATA_API_ENDPOINT = "https://data-api.polymarket.com"
+# Configuration
+CLOB_WS_URL = "wss://ws-subscriptions-clob.polymarket.com/ws/market"
 GAMMA_API_ENDPOINT = "https://gamma-api.polymarket.com"
+DATA_API_ENDPOINT = "https://data-api.polymarket.com"
 LOW_VOLUME_THRESHOLD = 5000  # daily avg volume
 TRADE_VALUE_THRESHOLD = 50000 # $50,000
 PRICE_SHIFT_THRESHOLD = 0.10 # 10%
 WINDOW_SECONDS = 300 # 5 minutes
-POLL_INTERVAL = 1 # 1 second frequency for 100% coverage
-HEARTBEAT_INTERVAL = 300 # 5 minutes stats report
-HASH_RETENTION_LIMIT = 50000 # LRU cache size
+REPORT_INTERVAL = 5 # seconds
+HEARTBEAT_INTERVAL = 300 # 5 minutes
 
 # API Configuration
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 DISCORD_WEBHOOK_URL = os.getenv("DISCORD_WEBHOOK_URL")
 
-if GEMINI_API_KEY:
-    # Google GenAI SDK (Modern Standard)
-    pass
-
-class PolymarketInsiderAgent:
+class PolymarketRealtimeAgent:
     def __init__(self):
-        self.processed_trade_hashes = OrderedDict()
-        self.market_cache = {}
+        self.market_cache = {} # conditionId -> info
+        self.asset_to_condition = {} # asset_id -> conditionId
         self.trade_history = {} # conditionId -> deque of trades
-        self.total_processed_count = 0
-        self.last_minute_count = 0
-        self.last_minute_time = time.time()
+        self.event_count = 0
         self.start_time = time.time()
+        self.last_report_time = time.time()
 
+        # Initialize Gemini 2.0 Client (Modern SDK)
         if GEMINI_API_KEY:
             try:
                 self.client_ai = genai.Client(api_key=GEMINI_API_KEY)
@@ -49,191 +47,167 @@ class PolymarketInsiderAgent:
         else:
             self.client_ai = None
 
-    def get_market_info(self, condition_id):
-        """Fetch market question and volume from Gamma API."""
-        if condition_id in self.market_cache:
-            return self.market_cache[condition_id]
-
+    def discover_active_tokens(self):
+        """Fetch active tokens from Gamma API for subscription."""
+        print("Discovering active markets...")
         try:
-            url = f"{GAMMA_API_ENDPOINT}/markets?condition_id={condition_id}"
+            # Prioritize active markets with volume
+            url = f"{GAMMA_API_ENDPOINT}/markets?active=true&limit=150"
             response = requests.get(url, timeout=10)
             if response.status_code == 200:
-                data = response.json()
-                if data:
-                    market = data[0]
-                    daily_vol = float(market.get('volume24hr', 0) or 0)
-                    info = {
-                        'question': market.get('question', 'Unknown Question'),
-                        'daily_volume': daily_vol
-                    }
-                    self.market_cache[condition_id] = info
-                    return info
-        except Exception:
-            pass
-        return None
+                asset_ids = []
+                for m in response.json():
+                    c_id = m.get('conditionId')
+                    q = m.get('question')
+                    v = float(m.get('volume24hr', 0) or 0)
+                    self.market_cache[c_id] = {'question': q, 'daily_volume': v}
 
-    def send_discord_notification(self, alert_data, analysis):
-        """Send a notification to a Discord webhook."""
-        if not DISCORD_WEBHOOK_URL:
-            print("[Discord] No webhook URL. Alert logged only.")
-            return
-
-        score = analysis.get('insider_probability_score', 0)
-        label = "🚨 HIGH PROBABILITY INSIDER TRADE DETECTED 🚨" if score > 80 else "⚠️ POTENTIAL INSIDER TRADE"
-
-        payload = {
-            "embeds": [{
-                "title": label,
-                "description": f"Forensic analysis of a large trade on **{alert_data['market_question']}**.",
-                "color": 15158332 if score > 80 else 15844367,
-                "fields": [
-                    {"name": "Insider Probability Score", "value": f"**{score}/100**", "inline": True},
-                    {"name": "Trade Value", "value": f"${alert_data['value_usd']:,.2f}", "inline": True},
-                    {"name": "Price Shift", "value": alert_data['price_shift'], "inline": True},
-                    {"name": "Daily Market Volume", "value": f"${alert_data['daily_volume']:,.2f}", "inline": True},
-                    {"name": "Wallet Address", "value": f"`{alert_data['wallet_address']}`", "inline": False},
-                    {"name": "Reasoning", "value": analysis.get('reasoning', 'No reasoning provided.'), "inline": False}
-                ],
-                "footer": {"text": f"Transaction: {alert_data['id']}"},
-                "timestamp": time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime(float(alert_data['timestamp'])))
-            }]
-        }
-
-        try:
-            requests.post(DISCORD_WEBHOOK_URL, json=payload, timeout=10)
+                    ids = m.get('clobTokenIds', [])
+                    if isinstance(ids, str): ids = json.loads(ids)
+                    for t_id in ids:
+                        self.asset_to_condition[t_id] = c_id
+                        asset_ids.append(t_id)
+                return asset_ids
         except Exception as e:
-            print(f"[Discord] Alert error: {e}")
+            print(f"Discovery error: {e}")
+        return []
 
-    def analyze_with_gemini(self, alert_data):
-        """Use Gemini 2.0 with search grounding for forensic analysis."""
-        if not self.client_ai:
-            return None
+    def get_trade_details(self, condition_id, target_price, retries=3):
+        """
+        Enrich WebSocket event with size and wallet from Data API.
+        Includes retry logic to account for indexing latency.
+        """
+        for attempt in range(retries):
+            try:
+                if attempt > 0: time.sleep(2) # Small delay for indexing
+                url = f"{DATA_API_ENDPOINT}/trades?conditionId={condition_id}&limit=20"
+                response = requests.get(url, timeout=5)
+                if response.status_code == 200:
+                    for t in response.json():
+                        if abs(float(t.get('price', 0)) - target_price) < 0.001:
+                            return float(t.get('size', 0)), t.get('proxyWallet', 'Unknown')
+            except Exception: pass
+        return 0, "Unknown"
 
-        trade_time_str = time.ctime(float(alert_data['timestamp']))
+    async def analyze_with_gemini(self, alert_data):
+        """Forensic analysis with search grounding."""
+        if not self.client_ai: return
         prompt = f"""
         You are an elite forensic market analyst.
         Analyze this Polymarket trade: {json.dumps(alert_data)}.
-        Use the Google Search tool to find if any public news justified this 10% odds spike at this exact time ({trade_time_str}).
-        1. Search specifically for news published BEFORE the trade.
-        2. If no news exists, assign a high "insider_probability_score".
-        3. Return a JSON object with: "insider_probability_score" (int 0-100), "reasoning" (string), "supporting_evidence" (list).
-
-        IMPORTANT: Your entire response must be a single valid JSON object.
+        Use the Google Search tool to find if any news justified this 10% odds spike at this time.
+        Return a JSON object: "insider_probability_score" (0-100), "reasoning", "supporting_evidence".
         """
-
-        print(f"[AI Analysis] Sending trade {alert_data['id'][:10]} to Gemini 2.0 for Reasoning...")
-
         try:
-            response = self.client_ai.models.generate_content(
-                model=self.model_id,
-                contents=prompt,
+            resp = self.client_ai.models.generate_content(
+                model=self.model_id, contents=prompt,
                 config=types.GenerateContentConfig(tools=[{'google_search': {}}])
             )
-
-            text = response.text
+            text = resp.text
             start, end = text.find('{'), text.rfind('}') + 1
             if start != -1 and end != -1:
                 analysis = json.loads(text[start:end])
-                print(f"Gemini Analysis for {alert_data['id'][:10]}: Score {analysis.get('insider_probability_score', 0)}/100")
-                self.send_discord_notification(alert_data, analysis)
-                return analysis
-        except Exception as e:
-            print(f"[AI Analysis] Gemini error: {e}")
-        return None
+                self.send_discord_alert(alert_data, analysis)
+        except Exception: pass
 
-    def process_trade(self, trade):
-        """Analyze a single trade for thresholds and price impact."""
-        tx_hash = trade.get('transactionHash')
-        condition_id = trade.get('conditionId')
-        timestamp = float(trade.get('timestamp', time.time()))
-        price, size = float(trade.get('price', 0)), float(trade.get('size', 0))
-        value_usd = size * price
+    def send_discord_alert(self, alert_data, analysis):
+        """Send Discord alert."""
+        if not DISCORD_WEBHOOK_URL: return
+        score = analysis.get('insider_probability_score', 0)
+        label = "🚨 HIGH PROBABILITY INSIDER 🚨" if score > 80 else "⚠️ POTENTIAL INSIDER"
+        payload = {
+            "embeds": [{
+                "title": label,
+                "color": 15158332 if score > 80 else 15844367,
+                "fields": [
+                    {"name": "Insider Score", "value": f"**{score}/100**", "inline": True},
+                    {"name": "Trade Value", "value": f"${alert_data['value_usd']:,.2f}", "inline": True},
+                    {"name": "Price Shift", "value": alert_data['price_shift'], "inline": True},
+                    {"name": "Wallet", "value": f"`{alert_data['wallet_address']}`", "inline": False},
+                    {"name": "Reasoning", "value": analysis.get('reasoning', '...'), "inline": False}
+                ],
+                "footer": {"text": f"Market: {alert_data['market_question']}"},
+                "timestamp": time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime(alert_data['timestamp']))
+            }]
+        }
+        requests.post(DISCORD_WEBHOOK_URL, json=payload, timeout=10)
 
-        if not tx_hash or not condition_id: return
-        if tx_hash in self.processed_trade_hashes: return
+    def process_ws_event(self, event):
+        """Handle real-time price update."""
+        asset_id = event.get('asset_id')
+        c_id = self.asset_to_condition.get(asset_id)
+        if not c_id: return
 
-        # Track hash (LRU)
-        self.processed_trade_hashes[tx_hash] = timestamp
-        self.total_processed_count += 1
-        self.last_minute_count += 1
+        self.event_count += 1
+        price = float(event.get('price', 0))
+        timestamp = time.time()
 
-        if len(self.processed_trade_hashes) > HASH_RETENTION_LIMIT:
-            self.processed_trade_hashes.popitem(last=False)
-
-        if condition_id not in self.trade_history:
-            self.trade_history[condition_id] = deque()
-        history = self.trade_history[condition_id]
+        if c_id not in self.trade_history: self.trade_history[c_id] = deque()
+        history = self.trade_history[c_id]
 
         history.append({'price': price, 'timestamp': timestamp})
         while history and history[0]['timestamp'] < (timestamp - WINDOW_SECONDS):
             history.popleft()
 
-        # Detection Logic
-        if value_usd > TRADE_VALUE_THRESHOLD and len(history) > 1:
+        if len(history) > 1:
             initial_price = history[0]['price']
             shift = abs(price - initial_price) / initial_price if initial_price else 0
 
             if shift > PRICE_SHIFT_THRESHOLD:
-                market_info = self.get_market_info(condition_id)
-                if market_info and market_info['daily_volume'] < LOW_VOLUME_THRESHOLD:
-                    alert_data = {
-                        'id': tx_hash,
-                        'wallet_address': trade.get('proxyWallet', 'Unknown'),
-                        'market_question': market_info['question'],
-                        'timestamp': timestamp,
-                        'value_usd': value_usd,
-                        'price_shift': f"{shift*100:.2f}%",
-                        'daily_volume': market_info['daily_volume']
-                    }
-                    print(f"\n[ALERT] FLAGGED TRADE DETECTED! Value: ${value_usd:,.2f} | Shift: {alert_data['price_shift']}")
-                    self.analyze_with_gemini(alert_data)
+                # Potential high impact event - Enrich with size/wallet from Data API
+                size, wallet = self.get_trade_details(c_id, price)
+                value_usd = size * price
 
-    def monitor(self):
-        """Functional monitoring loop using Polymarket Data API with high-frequency polling."""
-        print(f"Polymarket Monitoring Agent Started (Enhanced Visibility).")
-        print(f"  Configuration: Trades > ${TRADE_VALUE_THRESHOLD:,.0f} | Shift > {PRICE_SHIFT_THRESHOLD*100}%")
-        print(f"  Theoretical Capacity: ~1.8M trades/hr (Polling: {POLL_INTERVAL}s)")
+                if value_usd > TRADE_VALUE_THRESHOLD:
+                    m_info = self.market_cache.get(c_id)
+                    if m_info and m_info['daily_volume'] < LOW_VOLUME_THRESHOLD:
+                        alert_data = {
+                            'id': f"ws-{asset_id[:8]}", 'wallet_address': wallet,
+                            'market_question': m_info['question'], 'timestamp': timestamp,
+                            'value_usd': value_usd, 'price_shift': f"{shift*100:.2f}%",
+                            'daily_volume': m_info['daily_volume']
+                        }
+                        print(f"\n[ALERT] INSIDER SIGNAL DETECTED! Value: ${value_usd:,.2f} | Shift: {alert_data['price_shift']}")
+                        asyncio.create_task(self.analyze_with_gemini(alert_data))
 
-        last_heartbeat = time.time()
-
+    async def reporter(self, count):
+        """Background task for live visibility."""
         while True:
+            await asyncio.sleep(REPORT_INTERVAL)
+            elapsed = time.time() - self.start_time
+            print(f"[{time.strftime('%H:%M:%S')}] Monitoring {count} tokens | Live Events: {self.event_count} | Uptime: {elapsed/3600:.1f}h", end='\r', flush=True)
+
+    async def monitor(self):
+        """Main WebSocket loop with automatic reconnection."""
+        tokens = self.discover_active_tokens()
+        if not tokens: return
+
+        print(f"Polymarket Real-time Monitoring Agent Started.")
+        asyncio.create_task(self.reporter(len(tokens)))
+
+        async for websocket in websockets.connect(CLOB_WS_URL):
             try:
-                # Capture all trades in the interval with limit=500
-                response = requests.get(f"{DATA_API_ENDPOINT}/trades?limit=500", timeout=10)
-                if response.status_code == 200:
-                    trades = response.json()
-                    new_count = 0
-                    # Sort/Iterate chronologically (Data API is newest-first)
-                    for trade in reversed(trades):
-                        if trade.get('transactionHash') not in self.processed_trade_hashes:
-                            self.process_trade(trade)
-                            new_count += 1
+                # Subscribe in chunks to avoid payload limits
+                for i in range(0, len(tokens), 200):
+                    await websocket.send(json.dumps({"type": "market", "assets_ids": tokens[i:i+200]}))
 
-                    # Real-time feedback ticker
-                    t_str = time.strftime('%H:%M:%S')
-                    print(f"[{t_str}] Polled: {len(trades)} | New: {new_count} | Total Analyzed: {self.total_processed_count}", end='\r', flush=True)
-
-                now = time.time()
-                # Rate summary every minute
-                if now - self.last_minute_time > 60:
-                    rate = self.last_minute_count / ((now - self.last_minute_time)/60)
-                    print(f"\n[{time.strftime('%H:%M:%S')}] Throughput: {rate:.1f} trades/min")
-                    self.last_minute_count = 0
-                    self.last_minute_time = now
-
-                if now - last_heartbeat > HEARTBEAT_INTERVAL:
-                    uptime = (now - self.start_time) / 3600
-                    print(f"\n[HEARTBEAT] Uptime: {uptime:.1f}h | Unique Hashes: {len(self.processed_trade_hashes)}", flush=True)
-                    last_heartbeat = now
-
-                time.sleep(POLL_INTERVAL)
-            except KeyboardInterrupt:
-                print("\nAgent stopped.")
-                break
+                print(f"Subscribed. Streaming live data...")
+                while True:
+                    msg = await websocket.recv()
+                    data = json.loads(msg)
+                    if isinstance(data, list):
+                        for item in data:
+                            if item.get('event_type') == 'last_trade_price': self.process_ws_event(item)
+                    elif data.get('event_type') == 'last_trade_price':
+                        self.process_ws_event(data)
+            except websockets.ConnectionClosed:
+                print("\nWS Connection lost. Reconnecting...")
+                continue
             except Exception as e:
-                print(f"\nMonitoring error: {e}")
-                time.sleep(5)
+                print(f"\nWS Error: {e}")
+                await asyncio.sleep(5)
 
 if __name__ == "__main__":
-    agent = PolymarketInsiderAgent()
-    agent.monitor()
+    agent = PolymarketRealtimeAgent()
+    try: asyncio.run(agent.monitor())
+    except KeyboardInterrupt: print("\nAgent stopped.")
