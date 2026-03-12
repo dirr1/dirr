@@ -47,9 +47,14 @@ class TestPolymarketOptimizedAgent(unittest.TestCase):
         }
 
         with patch.object(self.agent, 'analyze_with_gemini', wraps=self.agent.analyze_with_gemini) as mock_analyze:
+            # Setup mock response for Gemini
+            mock_response = MagicMock()
+            mock_response.text = '{"insider_probability_score": 95, "reasoning": "Suspicious."}'
+            self.mock_client.models.generate_content.return_value = mock_response
+
             self.agent.process_trade(trade)
             mock_analyze.assert_called_once()
-            # Check that wallet address was correctly passed to the alert data
+            # Check that wallet address was correctly passed
             self.assertEqual(mock_analyze.call_args[0][0]['wallet_address'], '0xRealWalletAddress')
 
 if __name__ == '__main__':
