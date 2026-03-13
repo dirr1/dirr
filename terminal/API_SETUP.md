@@ -134,7 +134,7 @@ When working correctly, you should see:
 
 ### Issue: No volume data (all $0)
 
-**Solution**: 
+**Solution**:
 1. Ensure data_validation.require_volume_data is true
 2. The app automatically filters markets without volume
 3. Check if you have network connectivity
@@ -145,7 +145,7 @@ polyterm config --set data_validation.require_volume_data true
 
 ### Issue: API rate limiting
 
-**Solution**: 
+**Solution**:
 - Built-in rate limiter handles 60 requests/minute
 - Increase refresh interval if hitting limits:
   ```bash
@@ -240,4 +240,3 @@ polyterm config --set api.gamma_api_key "your-api-key-here"
 ## Last Updated
 
 This guide was verified on **October 14, 2025** with confirmed working endpoints returning live 2025 data.
-

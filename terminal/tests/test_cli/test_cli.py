@@ -8,19 +8,19 @@ from polyterm.cli.main import cli
 
 class TestCLI:
     """Test CLI main entry point"""
-    
+
     @pytest.fixture
     def runner(self):
         """Create CLI test runner"""
         return CliRunner()
-    
+
     def test_cli_version(self, runner):
         """Test CLI version command"""
         import polyterm
         result = runner.invoke(cli, ["--version"])
         assert result.exit_code == 0
         assert polyterm.__version__ in result.output
-    
+
     def test_cli_help(self, runner):
         """Test CLI help"""
         result = runner.invoke(cli, ["--help"])
@@ -32,21 +32,21 @@ class TestCLI:
 
 class TestConfigCommand:
     """Test config command"""
-    
+
     @pytest.fixture
     def runner(self):
         return CliRunner()
-    
+
     @patch('polyterm.cli.commands.config_cmd.Config')
     def test_config_list(self, mock_config, runner):
         """Test listing configuration"""
         mock_instance = Mock()
         mock_instance.config = {"alerts": {"probability_threshold": 10.0}}
         mock_config.return_value = mock_instance
-        
+
         result = runner.invoke(cli, ["config", "--list"])
         assert result.exit_code == 0
-    
+
     def test_config_set(self, runner, tmp_path, monkeypatch):
         """Test setting configuration value"""
         # Use a temp config file to avoid polluting real config
@@ -139,41 +139,41 @@ class TestExportCommand:
 
 class TestUtilityFunctions:
     """Test utility functions"""
-    
+
     def test_format_probability(self):
         """Test probability formatting"""
         from polyterm.utils.formatting import format_probability
-        
+
         result = format_probability(65.5)
         assert "65.5%" in result
-        
+
         result_with_change = format_probability(65.5, 60.0)
         assert "65.5%" in result_with_change
         assert "+5.5%" in result_with_change or "5.5%" in result_with_change
-    
+
     def test_format_volume(self):
         """Test volume formatting"""
         from polyterm.utils.formatting import format_volume
-        
+
         assert format_volume(1500) == "1.50K"
         assert format_volume(1500000) == "1.50M"
         assert format_volume(1500000000) == "1.50B"
-    
+
     def test_format_timestamp(self):
         """Test timestamp formatting"""
         from polyterm.utils.formatting import format_timestamp
-        
+
         result = format_timestamp(1234567890, include_time=True)
         assert len(result) > 0
         assert ":" in result  # Should include time
-        
+
         result_date_only = format_timestamp(1234567890, include_time=False)
         assert ":" not in result_date_only  # Should not include time
-    
+
     def test_format_duration(self):
         """Test duration formatting"""
         from polyterm.utils.formatting import format_duration
-        
+
         assert format_duration(30) == "30s"
         assert format_duration(120) == "2m"
         assert format_duration(3600) == "1h"
@@ -219,4 +219,3 @@ class TestConfigManagement:
 
         config.set("custom.nested.value", 100)
         assert config.get("custom.nested.value") == 100
-

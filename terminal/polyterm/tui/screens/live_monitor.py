@@ -82,22 +82,22 @@ def verify_category_markets(gamma_client: GammaClient, category: str, keywords: 
 
 def live_monitor_screen(console: RichConsole):
     """Interactive live monitor screen with market/category selection
-    
+
     Args:
         console: Rich Console instance
     """
     console.print(Panel("[bold red]🔴 Live Market Monitor Setup[/bold red]", style="red"))
     console.print()
-    
+
     # Load config
     config = Config()
-    
+
     # Initialize gamma client for market search
     gamma_client = GammaClient(
         base_url=config.gamma_base_url,
         api_key=config.gamma_api_key,
     )
-    
+
     try:
         # Monitoring mode selection
         console.print("[cyan]Select monitoring mode:[/cyan]")
@@ -106,15 +106,15 @@ def live_monitor_screen(console: RichConsole):
         console.print("2. 📂 Monitor category (crypto, politics, sports, etc.)")
         console.print("3. 🌐 Monitor all active markets")
         console.print()
-        
+
         choice = Prompt.ask("Enter choice", choices=["1", "2", "3"], default="1")
-        
+
         if choice == "1":
             # Market selection
             console.print()
             console.print("[cyan]Market Selection:[/cyan]")
             market_search = Prompt.ask("Enter market ID, slug, or search term")
-            
+
             try:
                 # Try as ID/slug first
                 try:
@@ -126,26 +126,26 @@ def live_monitor_screen(console: RichConsole):
                     # Search by term
                     console.print(f"\n[yellow]Searching for markets containing: {market_search}[/yellow]")
                     results = gamma_client.search_markets(market_search, limit=10)
-                    
+
                     if not results:
                         console.print(f"[red]No markets found for: {market_search}[/red]")
                         return
-                    
+
                     # Show search results
                     table = Table(title="Search Results", show_header=True, header_style="bold magenta")
                     table.add_column("#", style="cyan", width=3)
                     table.add_column("Market", style="white")
                     table.add_column("Category", style="dim")
-                    
+
                     for i, m in enumerate(results):
                         table.add_row(
                             str(i+1),
                             m.get("question", "")[:60],
                             m.get("category", "unknown")
                         )
-                    
+
                     console.print(table)
-                    
+
                     choice_num = Prompt.ask("Select market number", default="1")
                     try:
                         choice_idx = int(choice_num) - 1
@@ -160,14 +160,14 @@ def live_monitor_screen(console: RichConsole):
                     except ValueError:
                         console.print("[red]Invalid selection[/red]")
                         return
-                
+
                 # Launch live monitor for specific market
                 launch_live_monitor(console, market_id=market_id, market_title=market_title)
-                
+
             except Exception as e:
                 console.print(f"[red]Error finding market: {e}[/red]")
                 return
-        
+
         elif choice == "2":
             # Category selection with improved menu
             console.print()
@@ -246,17 +246,17 @@ def live_monitor_screen(console: RichConsole):
 
             console.print(f"\n[green]Selected:[/green] {cat_name}")
             launch_live_monitor(console, category=category)
-        
+
         else:
             # All markets
             console.print()
             console.print("[green]Monitoring all active markets[/green]")
             console.print("[dim]This will show the most active markets across all categories[/dim]")
             console.print()
-            
+
             if Confirm.ask("Launch live monitor for all markets?"):
                 launch_live_monitor(console)
-    
+
     except KeyboardInterrupt:
         console.print("\n[yellow]Setup cancelled[/yellow]")
     finally:
@@ -268,14 +268,14 @@ def live_monitor_screen(console: RichConsole):
 
 def launch_live_monitor(console: RichConsole, market_id: str = None, market_title: str = None, category: str = None):
     """Launch the live monitor in a new terminal window"""
-    
+
     console.print()
     console.print("[green]🔴 Launching Live Monitor...[/green]")
     console.print()
-    
+
     # Build command arguments
     cmd_args = [sys.executable, "-m", "polyterm.cli.main", "live-monitor"]
-    
+
     if market_id:
         cmd_args.extend(["--market", market_id])
         monitor_type = f"Market: {(market_title or 'Unknown')[:50]}"
@@ -284,7 +284,7 @@ def launch_live_monitor(console: RichConsole, market_id: str = None, market_titl
         monitor_type = f"Category: {category.title()}"
     else:
         monitor_type = "All Active Markets"
-    
+
     # Sanitize inputs for script generation (prevent code injection)
     safe_market_id = (market_id or '').replace('\\', '\\\\').replace('"', '\\"').replace("'", "\\'")
     safe_category = (category or '').replace('\\', '\\\\').replace('"', '\\"').replace("'", "\\'")
@@ -305,7 +305,7 @@ config = Config()
 monitor = LiveMarketMonitor(config, market_id="{safe_market_id}", category="{safe_category}")
 monitor.run_live_monitor()
 '''
-    
+
     # Write temporary script with proper synchronization
     script_path = os.path.join(tempfile.gettempdir(), f"polyterm_live_monitor_{os.getpid()}.py")
 
@@ -363,11 +363,11 @@ monitor.run_live_monitor()
             except Exception as e:
                 print(f"Error finding pipx Python: {e}")
                 pass
-            
+
             # Fallback to sys.executable if pipx not found
             if not pipx_python:
                 pipx_python = sys.executable
-            
+
             result = subprocess.run([
                 "osascript", "-e",
                 f'tell app "Terminal" to do script "{pipx_python} {script_path}"'
@@ -395,12 +395,12 @@ monitor.run_live_monitor()
             # Import and run directly
             from polyterm.cli.commands.live_monitor import LiveMarketMonitor
             from polyterm.utils.config import Config
-            
+
             config = Config()
             monitor = LiveMarketMonitor(config, market_id=market_id, category=category)
             monitor.run_live_monitor()
             return
-        
+
         # Success message
         console.print(Panel(
             f"[bold green]🔴 Live Monitor Launched![/bold green]\n\n"
@@ -409,21 +409,21 @@ monitor.run_live_monitor()
             f"[dim]Close the terminal window or press Ctrl+C to stop monitoring[/dim]",
             style="green"
         ))
-        
+
     except Exception as e:
         console.print(f"[red]Error launching live monitor: {e}[/red]")
         console.print("[yellow]Falling back to current terminal...[/yellow]")
-        
+
         # Fallback - run in current terminal
         try:
             from polyterm.cli.commands.live_monitor import LiveMarketMonitor
             from polyterm.utils.config import Config
-            
+
             config = Config()
             monitor = LiveMarketMonitor(config, market_id=market_id, category=category)
             monitor.run_live_monitor()
         except Exception as fallback_error:
             console.print(f"[red]Error running live monitor: {fallback_error}[/red]")
-    
+
     # Note: Script cleanup is handled by the live monitor itself when it exits
     # This prevents premature deletion before the second terminal can execute it

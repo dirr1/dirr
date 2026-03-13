@@ -147,4 +147,3 @@ def export(ctx, market, output_format, hours, output):
     finally:
         gamma_client.close()
         clob_client.close()
-

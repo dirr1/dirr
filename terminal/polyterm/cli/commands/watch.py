@@ -19,10 +19,10 @@ from ...core.alerts import AlertManager
 @click.pass_context
 def watch(ctx, market, threshold, volume_threshold, interval, notify):
     """Watch specific markets with customizable alerts"""
-    
+
     config = ctx.obj["config"]
     console = Console()
-    
+
     # Initialize clients
     gamma_client = GammaClient(
         base_url=config.gamma_base_url,
@@ -33,10 +33,10 @@ def watch(ctx, market, threshold, volume_threshold, interval, notify):
         ws_endpoint=config.clob_endpoint,
     )
     subgraph_client = SubgraphClient(endpoint=config.subgraph_endpoint)
-    
+
     # Find market
     console.print(f"[cyan]Searching for market: {market}[/cyan]")
-    
+
     try:
         # Try as ID first
         market_data = gamma_client.get_market(market)
@@ -48,22 +48,22 @@ def watch(ctx, market, threshold, volume_threshold, interval, notify):
         if not results:
             console.print(f"[red]No markets found for: {market}[/red]")
             return
-        
+
         # Show options
         console.print("\n[yellow]Multiple markets found:[/yellow]")
         for i, m in enumerate(results):
             console.print(f"  {i+1}. {m.get('question')}")
-        
+
         choice = click.prompt("Select market number", type=int, default=1)
         selected = results[choice - 1]
         market_id = selected.get("id")
         market_title = selected.get("question")
-    
+
     console.print(f"\n[green]Watching:[/green] {market_title}")
     console.print(f"[cyan]Probability threshold:[/cyan] {threshold}%")
     console.print(f"[cyan]Volume threshold:[/cyan] {volume_threshold}%")
     console.print(f"[cyan]Check interval:[/cyan] {interval}s\n")
-    
+
     # Initialize scanner and alerts
     scanner = MarketScanner(
         gamma_client,
@@ -71,9 +71,9 @@ def watch(ctx, market, threshold, volume_threshold, interval, notify):
         subgraph_client,
         check_interval=interval,
     )
-    
+
     alert_manager = AlertManager(enable_system_notifications=notify)
-    
+
     # Add alert callback
     def on_shift(shift_data):
         thresholds = {
@@ -81,9 +81,9 @@ def watch(ctx, market, threshold, volume_threshold, interval, notify):
             "volume": volume_threshold,
         }
         alert_manager.process_shift(shift_data, thresholds)
-    
+
     scanner.add_shift_callback(on_shift)
-    
+
     # Start monitoring
     try:
         scanner.start_monitoring(
@@ -98,4 +98,3 @@ def watch(ctx, market, threshold, volume_threshold, interval, notify):
     finally:
         gamma_client.close()
         clob_client.close()
-

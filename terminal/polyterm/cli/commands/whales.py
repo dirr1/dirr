@@ -25,7 +25,7 @@ def whales(ctx, min_amount, market, hours, limit, output_format):
 
     config = ctx.obj["config"]
     console = Console()
-    
+
     # Initialize clients
     gamma_client = GammaClient(
         base_url=config.gamma_base_url,
@@ -43,7 +43,7 @@ def whales(ctx, min_amount, market, hours, limit, output_format):
         console.print(f"[cyan]Period: Last {hours} hours[/cyan]")
         console.print("[dim]Note: Showing markets with significant 24hr volume "
                      "(individual trades not available from API)[/dim]\n")
-    
+
     try:
         # Get whale trades
         whale_trades = analytics.track_whale_trades(

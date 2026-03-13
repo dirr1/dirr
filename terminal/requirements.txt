@@ -30,4 +30,3 @@ responses>=0.24.1
 
 # Notifications
 plyer>=2.1.0
-

@@ -152,4 +152,3 @@ export POLYTERM_CONFIG_PATH="/custom/path"  # Optional
 Feel free to open an issue for any questions about contributing.
 
 **Thank you for contributing to PolyTerm!** 🎉
-

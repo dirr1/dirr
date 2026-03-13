@@ -111,22 +111,22 @@ def matches_category(market: dict, category: str) -> bool:
 
 class LiveMarketMonitor:
     """Enhanced live market monitor with color-coded indicators and real-time updates"""
-    
+
     def __init__(self, config, market_id: Optional[str] = None, category: Optional[str] = None):
         self.config = config
         self.market_id = market_id
         self.category = category
         self.console = Console(theme=None, force_terminal=True)
-        
+
         # Process tracking for cleanup
         self._live_display = None
         self._running = False
-        
+
         # Register cleanup handlers
         signal.signal(signal.SIGINT, self._signal_handler)
         signal.signal(signal.SIGTERM, self._signal_handler)
         atexit.register(self.cleanup)
-        
+
         # Initialize clients
         self.gamma_client = GammaClient(
             base_url=config.gamma_base_url,
@@ -137,7 +137,7 @@ class LiveMarketMonitor:
             ws_endpoint=config.clob_endpoint,
         )
         self.subgraph_client = SubgraphClient(endpoint=config.subgraph_endpoint)
-        
+
         # Initialize aggregator and scanner
         self.aggregator = APIAggregator(self.gamma_client, self.clob_client, self.subgraph_client)
         self.scanner = MarketScanner(
@@ -146,27 +146,27 @@ class LiveMarketMonitor:
             self.subgraph_client,
             check_interval=1,  # 1 second updates for live monitoring
         )
-        
+
         # State tracking for color indicators
         self.previous_data = {}
         self.price_history = {}
         self.volume_history = {}
-    
+
     def _signal_handler(self, signum, frame):
         """Handle interrupt signals"""
         self.console.print(f"\n[yellow]🔴 Received signal {signum}, shutting down gracefully...[/yellow]")
         self._running = False
         self.cleanup()
         sys.exit(0)
-        
+
     def get_color_indicator(self, current: float, previous: float, indicator_type: str = "price") -> str:
         """Get color-coded indicator for changes"""
         if previous is None or previous == 0:
             return "white"
-        
+
         change = current - previous
         change_pct = (change / previous) * 100
-        
+
         if indicator_type == "price":
             if change_pct > 2:
                 return "bright_green"
@@ -189,14 +189,14 @@ class LiveMarketMonitor:
                 return "magenta"
             else:
                 return "white"
-        
+
         return "white"
-    
+
     def get_change_symbol(self, current: float, previous: float) -> str:
         """Get directional symbol for changes"""
         if previous is None or previous == 0:
             return "●"
-        
+
         change = current - previous
         if change > 0:
             return "▲"
@@ -204,31 +204,31 @@ class LiveMarketMonitor:
             return "▼"
         else:
             return "●"
-    
+
     def format_price_change(self, current: float, previous: float) -> str:
         """Format price change with color and symbol"""
         if previous is None or previous == 0:
             return f"[white]{current:.2f}[/white]"
-        
+
         change = current - previous
         change_pct = (change / previous) * 100
         color = self.get_color_indicator(current, previous, "price")
         symbol = self.get_change_symbol(current, previous)
-        
+
         return f"[{color}]{symbol} {current:.2f} ({change_pct:+.1f}%)[/{color}]"
-    
+
     def format_volume_change(self, current: float, previous: float) -> str:
         """Format volume change with color and symbol"""
         if previous is None or previous == 0:
             return f"[white]${current:,.0f}[/white]"
-        
+
         change = current - previous
         change_pct = (change / previous) * 100
         color = self.get_color_indicator(current, previous, "volume")
         symbol = self.get_change_symbol(current, previous)
-        
+
         return f"[{color}]{symbol} ${current:,.0f} ({change_pct:+.0f}%)[/{color}]"
-    
+
     def get_market_data(self) -> List[Dict[str, Any]]:
         """Get market data based on current selection"""
         try:
@@ -256,11 +256,11 @@ class LiveMarketMonitor:
         except Exception as e:
             self.console.print(f"[red]Error fetching market data: {e}[/red]")
             return []
-    
+
     def generate_live_table(self) -> Table:
         """Generate live market table with color indicators"""
         now = datetime.now()
-        
+
         # Create header based on selection
         if self.market_id:
             title = f"🔴 LIVE MARKET MONITOR - Single Market"
@@ -268,27 +268,27 @@ class LiveMarketMonitor:
             title = f"🔴 LIVE MARKET MONITOR - {self.category.upper()} Category"
         else:
             title = f"🔴 LIVE MARKET MONITOR - All Active Markets"
-        
+
         table = Table(
             title=f"{title} (Updated: {now.strftime('%H:%M:%S')})",
             title_style="bold red",
             show_header=True,
             header_style="bold magenta"
         )
-        
+
         # Configure columns
         table.add_column("Market", style="cyan", no_wrap=False, max_width=50)
         table.add_column("Price", justify="right", style="bold")
         table.add_column("24h Volume", justify="right", style="bold")
         table.add_column("Change", justify="right", style="bold")
         table.add_column("Status", justify="center", style="bold")
-        
+
         # Get market data
         markets = self.get_market_data()
-        
+
         for market in markets:
             market_id = market.get("id")
-            
+
             # Get title - prefer question from nested markets array, fallback to title
             title = ""
             if market.get('markets') and len(market.get('markets', [])) > 0:
@@ -296,12 +296,12 @@ class LiveMarketMonitor:
             else:
                 title = market.get('title', '')
             title = title[:50]
-            
+
             # Get price data from nested markets array
             outcome_prices = None
             if market.get('markets') and len(market.get('markets', [])) > 0:
                 outcome_prices = market['markets'][0].get('outcomePrices')
-            
+
             # Parse outcome prices
             if isinstance(outcome_prices, str):
                 import json
@@ -309,25 +309,25 @@ class LiveMarketMonitor:
                     outcome_prices = json.loads(outcome_prices)
                 except Exception:
                     outcome_prices = None
-            
+
             if outcome_prices and isinstance(outcome_prices, list) and len(outcome_prices) > 0:
                 current_price = float(outcome_prices[0])
             else:
                 current_price = 0
-            
+
             # Get previous price for comparison
             previous_price = self.previous_data.get(market_id, {}).get('price')
-            
+
             # Get volume data
             current_volume = float(market.get('volume24hr', 0) or 0)
             previous_volume = self.previous_data.get(market_id, {}).get('volume')
-            
+
             # Format price with change indicator
             price_text = self.format_price_change(current_price, previous_price)
-            
+
             # Format volume with change indicator
             volume_text = self.format_volume_change(current_volume, previous_volume)
-            
+
             # Calculate overall change
             if previous_price and previous_price > 0:
                 price_change_pct = ((current_price - previous_price) / previous_price) * 100
@@ -339,7 +339,7 @@ class LiveMarketMonitor:
                     change_text = f"[yellow]● {price_change_pct:+.1f}%[/yellow]"
             else:
                 change_text = "[white]● NEW[/white]"
-            
+
             # Market status
             end_date_str = market.get('endDate', '')
             if end_date_str:
@@ -348,10 +348,10 @@ class LiveMarketMonitor:
                         end_date = date_parser.parse(end_date_str)
                     else:
                         end_date = datetime.fromisoformat(end_date_str.replace('Z', '+00:00'))
-                    
+
                     now_utc = datetime.now(timezone.utc)
                     hours_until = (end_date - now_utc).total_seconds() / 3600
-                    
+
                     if hours_until > 24:
                         days_until = int(hours_until / 24)
                         status_text = f"[green]{days_until}d left[/green]"
@@ -363,7 +363,7 @@ class LiveMarketMonitor:
                     status_text = "[dim]?[/dim]"
             else:
                 status_text = "[green]ACTIVE[/green]"
-            
+
             # Add row to table
             table.add_row(
                 title,
@@ -372,16 +372,16 @@ class LiveMarketMonitor:
                 change_text,
                 status_text
             )
-            
+
             # Store current data for next comparison
             self.previous_data[market_id] = {
                 'price': current_price,
                 'volume': current_volume,
                 'timestamp': now
             }
-        
+
         return table
-    
+
     def run_live_monitor(self):
         """Run the live monitoring loop with real-time trade feeds"""
         self._running = True
@@ -508,7 +508,7 @@ class LiveMarketMonitor:
 
             # Start listening for trades
             await self.clob_client.listen_for_trades()
-            
+
         except Exception as e:
             self.console.print(f"[red]❌ WebSocket error: {e}[/red]")
             # Fallback to polling mode
@@ -583,45 +583,45 @@ class LiveMarketMonitor:
     async def _run_polling_monitor(self, market_slugs: List[str], market_titles: Dict[str, str]):
         """Fallback polling mode when WebSocket fails"""
         self.console.print("[yellow]📊 Polling mode - checking for changes every 2 seconds...[/yellow]")
-        
+
         last_prices = {}
-        
+
         while self._running:
             try:
                 markets = self.get_market_data()
                 current_time = datetime.now(timezone.utc).strftime("%H:%M:%S")
-                
+
                 for market in markets:
                     market_id = market.get("id")
                     if not market_id:
                         continue
-                    
+
                     # Get current price
                     current_price = self._get_market_values(market)['price']
                     previous_price = last_prices.get(market_id)
-                    
+
                     if previous_price is not None and current_price != previous_price:
                         # Price changed - simulate a trade
                         direction = "🟢 BUY" if current_price > previous_price else "🔴 SELL"
                         color = "green" if current_price > previous_price else "red"
-                        
+
                         market_title = market_titles.get(market_id, "Unknown")
                         title_short = market_title[:30] + "..." if len(market_title) > 30 else market_title
-                        
+
                         self.console.print(
                             f"[{color}]{current_time} | {title_short:<33} | {direction} | "
                             f"PRICE CHANGE | ${previous_price:.4f} → ${current_price:.4f}[/{color}]"
                         )
-                    
+
                     last_prices[market_id] = current_price
-                
+
                 await asyncio.sleep(2)  # Poll every 2 seconds
-                
+
             except Exception as e:
                 if self._running:
                     self.console.print(f"[red]{datetime.now(timezone.utc).strftime('%H:%M:%S')} | ERROR: {e}[/red]")
                 await asyncio.sleep(5)
-    
+
     def cleanup(self):
         """Clean up resources and ensure complete termination"""
         try:
@@ -768,34 +768,34 @@ class LiveMarketMonitor:
 @click.pass_context
 def live_monitor(ctx, market, category, interactive):
     """Launch dedicated live market monitor in new terminal window"""
-    
+
     config = ctx.obj["config"]
-    
+
     if interactive:
         # Interactive selection mode
         console = Console()
         console.print(Panel("[bold]🔴 Live Market Monitor Setup[/bold]", style="red"))
         console.print()
-        
+
         # Market/Category selection
         console.print("[cyan]Select monitoring mode:[/cyan]")
         console.print("1. Monitor specific market")
         console.print("2. Monitor category (crypto, politics, sports, etc.)")
         console.print("3. Monitor all active markets")
-        
+
         choice = click.prompt("Enter choice (1-3)", type=int, default=1)
-        
+
         if choice == 1:
             # Market selection
             market_search = click.prompt("Enter market ID, slug, or search term")
-            
+
             # Try to find market
             try:
                 gamma_client = GammaClient(
                     base_url=config.gamma_base_url,
                     api_key=config.gamma_api_key,
                 )
-                
+
                 # Try as ID/slug first
                 try:
                     market_data = gamma_client.get_market(market_search)
@@ -807,34 +807,34 @@ def live_monitor(ctx, market, category, interactive):
                     if not results:
                         console.print(f"[red]No markets found for: {market_search}[/red]")
                         return
-                    
+
                     # Show options
                     console.print("\n[yellow]Multiple markets found:[/yellow]")
                     for i, m in enumerate(results):
                         console.print(f"  {i+1}. {m.get('question')}")
-                    
+
                     choice = click.prompt("Select market number", type=int, default=1)
                     selected = results[choice - 1]
                     market_id = selected.get("id")
                     market_title = selected.get("question")
-                
+
                 console.print(f"\n[green]Selected:[/green] {market_title}")
                 market = market_id
-                
+
             except Exception as e:
                 console.print(f"[red]Error finding market: {e}[/red]")
                 return
-        
+
         elif choice == 2:
             # Category selection
             console.print("\n[cyan]Available categories:[/cyan]")
-            
+
             categories = ["crypto", "politics", "sports", "economics", "entertainment", "other"]
-            
+
             for i, cat in enumerate(categories, 1):
                 console.print(f"  {i}. {cat}")
             console.print()
-            
+
             try:
                 cat_choice = click.prompt("Select category (1-6)", type=int, default=1)
                 if 1 <= cat_choice <= len(categories):
@@ -845,18 +845,18 @@ def live_monitor(ctx, market, category, interactive):
             except ValueError:
                 console.print("[red]Invalid input. Using 'crypto' as default.[/red]")
                 category = "crypto"
-            
+
             console.print(f"\n[green]Selected category:[/green] {category}")
-        
+
         else:
             # All markets
             console.print("\n[green]Monitoring all active markets[/green]")
-    
+
     # Launch live monitor in new terminal
     if market or category:
         # Create monitor instance
         monitor = LiveMarketMonitor(config, market_id=market, category=category)
-        
+
         # Launch in new terminal window
         script_content = f'''
 from polyterm.cli.commands.live_monitor import LiveMarketMonitor
@@ -869,12 +869,12 @@ config = Config()
 monitor = LiveMarketMonitor(config, market_id="{market or ''}", category="{category or ''}")
 monitor.run_live_monitor()
 '''
-        
+
         # Write temporary script
         script_path = "/tmp/polyterm_live_monitor.py"
         with open(script_path, 'w') as f:
             f.write(script_content)
-        
+
         # Launch in new terminal
         if sys.platform == "darwin":  # macOS
             subprocess.run([
@@ -889,9 +889,9 @@ monitor.run_live_monitor()
             subprocess.Popen([
                 "start", "cmd", "/k", f"python {script_path}"
             ])
-        
+
         console.print(f"\n[green]🔴 Live monitor launched in new terminal window![/green]")
         console.print("[dim]Close the terminal window or press Ctrl+C to stop monitoring[/dim]")
-    
+
     else:
         console.print("[red]Please specify --market, --category, or use --interactive mode[/red]")

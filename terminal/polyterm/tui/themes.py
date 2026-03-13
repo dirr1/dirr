@@ -18,7 +18,7 @@ THEMES: Dict[str, Dict[str, str]] = {
         'dim': 'dim',
         'status_bar': 'on blue',
     },
-    
+
     'dark': {
         'logo': 'bold blue',
         'menu_title': 'bold white',
@@ -33,7 +33,7 @@ THEMES: Dict[str, Dict[str, str]] = {
         'dim': 'dim',
         'status_bar': 'on black',
     },
-    
+
     'light': {
         'logo': 'bold blue',
         'menu_title': 'bold black',
@@ -48,7 +48,7 @@ THEMES: Dict[str, Dict[str, str]] = {
         'dim': 'dim white',
         'status_bar': 'on white',
     },
-    
+
     'matrix': {
         'logo': 'bold green',
         'menu_title': 'bold green',
@@ -68,10 +68,10 @@ THEMES: Dict[str, Dict[str, str]] = {
 
 def get_theme(name: str = 'default') -> Dict[str, str]:
     """Get color theme by name
-    
+
     Args:
         name: Theme name (default, dark, light, matrix)
-    
+
     Returns:
         Theme color dictionary
     """
@@ -80,10 +80,8 @@ def get_theme(name: str = 'default') -> Dict[str, str]:
 
 def list_themes() -> list:
     """List available theme names
-    
+
     Returns:
         List of theme names
     """
     return list(THEMES.keys())
-
-

@@ -9,7 +9,7 @@ from polyterm.tui.controller import TUIController
 def test_tui_controller_creation(mock_console_class):
     """Test TUI controller can be created"""
     controller = TUIController()
-    
+
     assert controller is not None
     assert hasattr(controller, 'console')
     assert hasattr(controller, 'menu')
@@ -23,14 +23,14 @@ def test_tui_quit_command(mock_console_class, mock_display_logo):
     """Test TUI quits on 'q' command"""
     mock_console = Mock()
     mock_console_class.return_value = mock_console
-    
+
     mock_menu = Mock()
     mock_menu.get_choice.return_value = 'q'
-    
+
     controller = TUIController()
     controller.menu = mock_menu
     controller.run()
-    
+
     # Should have quit
     assert controller.running is False
     assert mock_console.print.called
@@ -71,18 +71,18 @@ def test_tui_invalid_choice(mock_console_class, mock_display_logo):
     """Test TUI handles invalid menu choice"""
     mock_console = Mock()
     mock_console_class.return_value = mock_console
-    
+
     mock_menu = Mock()
     mock_menu.get_choice.side_effect = ['invalid', 'q']
-    
+
     # Mock the input() call to return to menu
     with patch('builtins.input', return_value=''):
         controller = TUIController()
         controller.menu = mock_menu
         controller.run()
-    
+
     # Should have printed error message
-    error_calls = [call for call in mock_console.print.call_args_list 
+    error_calls = [call for call in mock_console.print.call_args_list
                    if 'Invalid choice' in str(call)]
     assert len(error_calls) > 0
 
@@ -93,14 +93,14 @@ def test_tui_keyboard_interrupt(mock_console_class, mock_display_logo):
     """Test TUI handles Ctrl+C gracefully"""
     mock_console = Mock()
     mock_console_class.return_value = mock_console
-    
+
     mock_menu = Mock()
     mock_menu.get_choice.side_effect = KeyboardInterrupt()
-    
+
     controller = TUIController()
     controller.menu = mock_menu
     controller.run()
-    
+
     # Should have handled interrupt
     assert controller.running is False
 
@@ -183,4 +183,3 @@ def test_tui_alternative_shortcuts(mock_console_class, mock_display_logo):
         assert mock_monitor.called
     finally:
         SCREEN_ROUTES['mon'] = original
-

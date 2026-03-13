@@ -45,4 +45,3 @@ clean:
 
 test:
 	pytest tests/ -v
-

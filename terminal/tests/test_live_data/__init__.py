@@ -1,2 +1,1 @@
 """Live data validation tests"""
-

@@ -126,10 +126,10 @@ def matches_category(market: dict, category: str) -> bool:
 @click.pass_context
 def monitor(ctx, limit, category, refresh, active_only, sort, output_format, once, show_quality):
     """Monitor markets in real-time with live updates"""
-    
+
     config = ctx.obj["config"]
     console = Console()
-    
+
     # Initialize clients
     gamma_client = GammaClient(
         base_url=config.gamma_base_url,
@@ -141,19 +141,19 @@ def monitor(ctx, limit, category, refresh, active_only, sort, output_format, onc
     )
     # Initialize aggregator for live data
     aggregator = APIAggregator(gamma_client, clob_client, None)
-    
+
     def generate_table():
         """Generate market table"""
         now = datetime.now()
         table = Table(title=f"PolyTerm - Live Market Monitor (Updated: {now.strftime('%H:%M:%S')})")
-        
+
         table.add_column("Market", style="cyan", no_wrap=False, max_width=40 if show_quality else 45)
         table.add_column("Prob", justify="right", style="green")
         table.add_column("24h Volume", justify="right", style="yellow")
         if show_quality:
             table.add_column("Quality", justify="center", width=7)
         table.add_column("Ends", justify="right", style="dim")
-        
+
         try:
             # When filtering by category, fetch many more markets since we filter after
             # Need at least 100 to find enough category-specific markets
@@ -197,17 +197,17 @@ def monitor(ctx, limit, category, refresh, active_only, sort, output_format, onc
                 markets = sorted(markets, key=get_probability, reverse=True)
             elif sort == 'recent':
                 markets = sorted(markets, key=lambda m: m.get('endDate', ''), reverse=False)
-            
+
             for market in markets:
                 market_id = market.get("id")
                 title = market.get("question", market.get("title", "Unknown Market"))[:45]
-                
+
                 # Get probability and volume from market data
                 # outcomePrices can be at top level or nested in markets[0]
                 outcome_prices = market.get('outcomePrices')
                 if not outcome_prices and market.get('markets') and len(market.get('markets', [])) > 0:
                     outcome_prices = market['markets'][0].get('outcomePrices')
-                
+
                 # Parse outcome prices (can be string "[\"0.5\", \"0.5\"]" or list)
                 if isinstance(outcome_prices, str):
                     import json
@@ -215,15 +215,15 @@ def monitor(ctx, limit, category, refresh, active_only, sort, output_format, onc
                         outcome_prices = json.loads(outcome_prices)
                     except Exception:
                         outcome_prices = None
-                
+
                 if outcome_prices and isinstance(outcome_prices, list) and len(outcome_prices) > 0:
                     price = float(outcome_prices[0])
                 else:
                     price = 0
-                
+
                 probability = price * 100 if price else 0
                 volume_24hr = float(market.get('volume24hr', 0) or 0)
-                
+
                 # Calculate data age
                 end_date_str = market.get('endDate', '')
                 data_age = "Live"
@@ -233,11 +233,11 @@ def monitor(ctx, limit, category, refresh, active_only, sort, output_format, onc
                             end_date = date_parser.parse(end_date_str)
                         else:
                             end_date = datetime.fromisoformat(end_date_str.replace('Z', '+00:00'))
-                        
+
                         # Make now timezone-aware to match end_date
                         from datetime import timezone
                         now_utc = datetime.now(timezone.utc)
-                        
+
                         hours_until = (end_date - now_utc).total_seconds() / 3600
                         if hours_until > 24:
                             days_until = int(hours_until / 24)
@@ -248,7 +248,7 @@ def monitor(ctx, limit, category, refresh, active_only, sort, output_format, onc
                             data_age = "[red]Ended[/red]"
                     except Exception as e:
                         data_age = "?"
-                
+
                 # Format probability with color
                 prob_style = "green" if probability > 50 else "yellow" if probability > 30 else "white"
                 prob_text = f"[{prob_style}]{probability:.1f}%[/{prob_style}]"
@@ -283,12 +283,12 @@ def monitor(ctx, limit, category, refresh, active_only, sort, output_format, onc
                         volume_text,
                         data_age,
                     )
-        
+
         except Exception as e:
             handle_api_error(console, e, "fetching markets")
 
         return table
-    
+
     def get_markets_data():
         """Get filtered and sorted markets data"""
         try:

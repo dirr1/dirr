@@ -3,4 +3,3 @@ include LICENSE
 include requirements.txt
 include pytest.ini
 recursive-include tests *.py
-

@@ -46,14 +46,14 @@ class SubgraphClient:
             self.client = Client(transport=transport, fetch_schema_from_transport=False)
         else:
             self.client = None
-    
+
     def query(self, query_string: str, variables: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """Execute GraphQL query
-        
+
         Args:
             query_string: GraphQL query string
             variables: Query variables
-        
+
         Returns:
             Query result dictionary
         """
@@ -65,7 +65,7 @@ class SubgraphClient:
             return result
         except Exception as e:
             raise Exception(f"GraphQL query failed: {e}")
-    
+
     def get_market_trades(
         self,
         market_id: str,
@@ -75,14 +75,14 @@ class SubgraphClient:
         order_direction: str = "desc",
     ) -> List[Dict[str, Any]]:
         """Get trades for a market from on-chain data
-        
+
         Args:
             market_id: Market ID
             first: Number of trades to fetch
             skip: Number of trades to skip
             order_by: Field to order by
             order_direction: 'asc' or 'desc'
-        
+
         Returns:
             List of trade dictionaries
         """
@@ -106,7 +106,7 @@ class SubgraphClient:
                 }
             }
         """
-        
+
         variables = {
             "marketId": market_id,
             "first": first,
@@ -114,10 +114,10 @@ class SubgraphClient:
             "orderBy": order_by,
             "orderDirection": order_direction,
         }
-        
+
         result = self.query(query_string, variables)
         return result.get("trades", [])
-    
+
     def get_market_volume(
         self,
         market_id: str,
@@ -125,12 +125,12 @@ class SubgraphClient:
         end_time: Optional[int] = None,
     ) -> Dict[str, Any]:
         """Get aggregated volume for a market
-        
+
         Args:
             market_id: Market ID
             start_time: Start timestamp (Unix)
             end_time: End timestamp (Unix)
-        
+
         Returns:
             Volume statistics
         """
@@ -152,16 +152,16 @@ class SubgraphClient:
                 }
             }
         """
-        
+
         variables = {
             "marketId": market_id,
             "startTime": start_time,
             "endTime": end_time,
         }
-        
+
         result = self.query(query_string, variables)
         return result.get("market", {})
-    
+
     def get_whale_trades(
         self,
         min_notional: float = 10000,
@@ -169,12 +169,12 @@ class SubgraphClient:
         skip: int = 0,
     ) -> List[Dict[str, Any]]:
         """Get large trades (whale activity)
-        
+
         Args:
             min_notional: Minimum trade size (shares * price)
             first: Number of trades to fetch
             skip: Number to skip
-        
+
         Returns:
             List of large trade dictionaries
         """
@@ -197,15 +197,15 @@ class SubgraphClient:
                 }
             }
         """
-        
+
         variables = {
             "first": first,
             "skip": skip,
         }
-        
+
         result = self.query(query_string, variables)
         trades = result.get("trades", [])
-        
+
         # Filter by notional value
         whale_trades = []
         for trade in trades:
@@ -213,15 +213,15 @@ class SubgraphClient:
             if notional >= min_notional:
                 trade["notional"] = notional
                 whale_trades.append(trade)
-        
+
         return whale_trades
-    
+
     def get_user_positions(self, wallet_address: str) -> List[Dict[str, Any]]:
         """Get positions for a wallet address
-        
+
         Args:
             wallet_address: User's wallet address
-        
+
         Returns:
             List of position dictionaries
         """
@@ -239,23 +239,23 @@ class SubgraphClient:
                 }
             }
         """
-        
+
         variables = {"walletAddress": wallet_address.lower()}
-        
+
         result = self.query(query_string, variables)
         return result.get("positions", [])
-    
+
     def get_market_liquidity_changes(
         self,
         market_id: str,
         first: int = 100,
     ) -> List[Dict[str, Any]]:
         """Get liquidity change events for a market
-        
+
         Args:
             market_id: Market ID
             first: Number of events to fetch
-        
+
         Returns:
             List of liquidity event dictionaries
         """
@@ -276,21 +276,21 @@ class SubgraphClient:
                 }
             }
         """
-        
+
         variables = {
             "marketId": market_id,
             "first": first,
         }
-        
+
         result = self.query(query_string, variables)
         return result.get("liquidityEvents", [])
-    
+
     def get_market_statistics(self, market_id: str) -> Dict[str, Any]:
         """Get comprehensive statistics for a market
-        
+
         Args:
             market_id: Market ID
-        
+
         Returns:
             Market statistics dictionary
         """
@@ -309,30 +309,30 @@ class SubgraphClient:
                 }
             }
         """
-        
+
         variables = {"marketId": market_id}
-        
+
         result = self.query(query_string, variables)
         return result.get("market", {})
-    
+
     def get_trending_markets_by_volume(
         self,
         time_window: int = 86400,  # 24 hours
         first: int = 10,
     ) -> List[Dict[str, Any]]:
         """Get trending markets by recent volume
-        
+
         Args:
             time_window: Time window in seconds
             first: Number of markets to return
-        
+
         Returns:
             List of trending market dictionaries
         """
         import time
         end_time = int(time.time())
         start_time = end_time - time_window
-        
+
         query_string = """
             query GetTrendingMarkets($startTime: Int!, $first: Int!) {
                 markets(
@@ -350,12 +350,11 @@ class SubgraphClient:
                 }
             }
         """
-        
+
         variables = {
             "startTime": start_time,
             "first": first,
         }
-        
+
         result = self.query(query_string, variables)
         return result.get("markets", [])
-

@@ -21,7 +21,7 @@ except ImportError:
 
 class CLOBClient:
     """Client for PolyMarket CLOB API (REST and WebSocket)"""
-    
+
     def __init__(
         self,
         rest_endpoint: str = "https://clob.polymarket.com",
@@ -136,13 +136,13 @@ class CLOBClient:
             return data
         except requests.exceptions.RequestException as e:
             raise Exception(f"Failed to get order book: {e}")
-    
+
     def get_ticker(self, market_id: str) -> Dict[str, Any]:
         """Get ticker data for a market
-        
+
         Args:
             market_id: Market ID
-        
+
         Returns:
             Ticker with last price, volume, etc.
         """
@@ -154,59 +154,59 @@ class CLOBClient:
             return response.json()
         except requests.exceptions.RequestException as e:
             raise Exception(f"Failed to get ticker: {e}")
-    
+
     def get_recent_trades(self, market_id: str, limit: int = 100) -> List[Dict[str, Any]]:
         """Get recent trades for a market
-        
+
         Args:
             market_id: Market ID
             limit: Maximum number of trades
-        
+
         Returns:
             List of recent trades
         """
         url = f"{self.rest_endpoint}/trades/{market_id}"
         params = {"limit": limit}
-        
+
         try:
             response = self._request("GET", url, params=params)
             response.raise_for_status()
             return response.json()
         except requests.exceptions.RequestException as e:
             raise Exception(f"Failed to get trades: {e}")
-    
+
     def get_market_depth(self, market_id: str) -> Dict[str, Any]:
         """Get market depth statistics
-        
+
         Args:
             market_id: Market ID
-        
+
         Returns:
             Market depth statistics
         """
         url = f"{self.rest_endpoint}/depth/{market_id}"
-        
+
         try:
             response = self._request("GET", url)
             response.raise_for_status()
             return response.json()
         except requests.exceptions.RequestException as e:
             raise Exception(f"Failed to get market depth: {e}")
-    
+
     # WebSocket Methods for Live Trading Data
-    
+
     async def connect_websocket(self):
         """Connect to PolyMarket RTDS WebSocket"""
         if not HAS_WEBSOCKETS:
             raise Exception("websockets library not installed. Install with: pip install websockets")
-        
+
         try:
             # Connect to RTDS endpoint (no path needed)
             self.ws_connection = await websockets.connect(self.ws_endpoint)
             return True
         except Exception as e:
             raise Exception(f"Failed to connect to WebSocket: {e}")
-    
+
     async def subscribe_to_trades(self, market_slugs: List[str], callback: Callable):
         """Subscribe to live trade feeds for multiple markets using RTDS
 
@@ -238,7 +238,7 @@ class CLOBClient:
         # If no specific markets, store callback for all trades
         if not market_slugs:
             self.subscriptions["_all"] = callback
-    
+
     async def listen_for_trades(self, max_reconnects: int = 5):
         """Listen for incoming trade messages from RTDS with auto-reconnection"""
         reconnect_attempts = 0
@@ -328,7 +328,7 @@ class CLOBClient:
 
         # Clear subscriptions on permanent failure
         self.subscriptions.clear()
-    
+
     async def close_websocket(self):
         """Close any active WebSocket connections."""
         if self.ws_connection:
@@ -352,7 +352,7 @@ class CLOBClient:
             self._ob_callback = None
         if hasattr(self, '_ob_token_ids'):
             self._ob_token_ids = []
-    
+
     def close(self):
         """Close REST session and best-effort close active websockets."""
         self.session.close()
@@ -498,19 +498,19 @@ class CLOBClient:
 
         spread = ((best_ask - best_bid) / best_bid) * 100
         return spread
-    
+
     def get_current_markets(self, limit: int = 100) -> List[Dict[str, Any]]:
         """Get current active markets (uses sampling-markets endpoint)
-        
+
         Args:
             limit: Maximum number of markets
-        
+
         Returns:
             List of current market dictionaries
         """
         url = f"{self.rest_endpoint}/sampling-markets"
         params = {"limit": limit}
-        
+
         try:
             response = self._request("GET", url, params=params)
             response.raise_for_status()
@@ -518,13 +518,13 @@ class CLOBClient:
             return data.get('data', [])
         except requests.exceptions.RequestException as e:
             raise Exception(f"Failed to get current markets: {e}")
-    
+
     def is_market_current(self, market: Dict[str, Any]) -> bool:
         """Check if market is current (2025 or later, not closed)
-        
+
         Args:
             market: Market dictionary
-        
+
         Returns:
             True if market is current
         """
@@ -532,42 +532,42 @@ class CLOBClient:
             # Check if closed
             if market.get('closed', False):
                 return False
-            
+
             # Check end date
             end_date_str = market.get('end_date_iso', market.get('end_date', ''))
             if not end_date_str:
                 return market.get('active', False)  # If no date, rely on active flag
-            
+
             # Parse date
             if HAS_DATEUTIL:
                 end_date = parser.parse(end_date_str)
             else:
                 end_date = datetime.fromisoformat(end_date_str.replace('Z', '+00:00'))
-            
+
             # Must be from current year or future
             if end_date.year < datetime.now().year:
                 return False
-            
+
             # Must not be in the past
             if end_date < datetime.now(end_date.tzinfo) if end_date.tzinfo else datetime.now():
                 return False
-                
+
             return True
         except Exception:
             return False
-    
+
     def detect_large_trade(self, trade: Dict[str, Any], threshold: float = 10000) -> bool:
         """Detect if a trade is "large" (whale trade)
-        
+
         Args:
             trade: Trade dictionary
             threshold: Minimum notional value for large trade
-        
+
         Returns:
             True if trade is large
         """
         size = float(trade.get("size", 0))
         price = float(trade.get("price", 0))
         notional = size * price
-        
+
         return notional >= threshold

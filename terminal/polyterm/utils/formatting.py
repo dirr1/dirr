@@ -9,22 +9,22 @@ from rich.text import Text
 def format_probability(probability: float, previous: Optional[float] = None) -> str:
     """Format probability as percentage with optional change indicator"""
     prob_str = f"{probability:.1f}%"
-    
+
     if previous is not None:
         change = probability - previous
         if abs(change) >= 0.1:  # Show change if >= 0.1%
             sign = "+" if change > 0 else ""
             prob_str += f" ({sign}{change:.1f}%)"
-    
+
     return prob_str
 
 
 def format_probability_rich(probability: float, previous: Optional[float] = None) -> Text:
     """Format probability with color coding based on change"""
     text = Text()
-    
+
     prob_str = f"{probability:.1f}%"
-    
+
     if previous is not None:
         change = probability - previous
         if change > 5:
@@ -37,15 +37,15 @@ def format_probability_rich(probability: float, previous: Optional[float] = None
             color = "red"
         else:
             color = "white"
-        
+
         text.append(prob_str, style=color)
-        
+
         if abs(change) >= 0.1:
             sign = "+" if change > 0 else ""
             text.append(f" ({sign}{change:.1f}%)", style=f"dim {color}")
     else:
         text.append(prob_str, style="white")
-    
+
     return text
 
 
@@ -106,4 +106,3 @@ def create_volatility_bar(volatility: float, width: int = 10) -> str:
     """Create ASCII bar chart for volatility"""
     filled = int(volatility / 10 * width)  # Assuming 0-100 volatility scale
     return "█" * filled + "░" * (width - filled)
-

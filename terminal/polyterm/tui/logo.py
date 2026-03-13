@@ -7,7 +7,7 @@ from rich.text import Text
 
 def display_logo(console: Console):
     """Display PolyTerm ASCII logo with colors, responsive to terminal width
-    
+
     Args:
         console: Rich Console instance
     """
@@ -16,12 +16,12 @@ def display_logo(console: Console):
         width = console.size.width
     except Exception:
         width = 80
-    
+
     # Force narrow terminal for testing if COLUMNS env var is set
     import os
     if 'COLUMNS' in os.environ:
         width = int(os.environ['COLUMNS'])
-    
+
     if width >= 80:
         # Full ASCII logo for wide terminals - NO BORDER
         logo_text = """
@@ -68,5 +68,3 @@ def display_logo(console: Console):
     console.print(logo_text, style="bold cyan")
     console.print(f"{nytemode_padding}[bright_magenta]a nytemode project[/bright_magenta]")
     console.print()
-
-

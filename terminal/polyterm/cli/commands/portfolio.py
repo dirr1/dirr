@@ -60,19 +60,19 @@ def _extract_position_fields(position):
 @click.pass_context
 def portfolio(ctx, wallet):
     """View portfolio and positions"""
-    
+
     config = ctx.obj["config"]
     console = Console()
-    
+
     # Get wallet address
     if not wallet:
         wallet = config.wallet_address
-    
+
     if not wallet:
         console.print("[red]Error: No wallet address provided[/red]")
         console.print("[yellow]Use --wallet flag or set in config[/yellow]")
         return
-    
+
     # Initialize clients
     gamma_client = GammaClient(
         base_url=config.gamma_base_url,
@@ -84,41 +84,41 @@ def portfolio(ctx, wallet):
     )
     # Initialize analytics (Data API-backed; no Subgraph dependency required)
     analytics = AnalyticsEngine(gamma_client, clob_client, None)
-    
+
     console.print(f"[cyan]Loading portfolio for:[/cyan] {wallet}\n")
-    
+
     try:
         # Get portfolio analytics
         portfolio_data = analytics.get_portfolio_analytics(wallet)
-        
+
         # Check for error from graceful degradation
         if portfolio_data.get("error"):
             console.print(f"[yellow]{portfolio_data['error']}[/yellow]")
             if portfolio_data.get("note"):
                 console.print(f"[dim]{portfolio_data['note']}[/dim]")
             return
-        
+
         if not portfolio_data.get("positions"):
             console.print("[yellow]No positions found[/yellow]")
             return
-        
+
         # Display summary
         console.print("[bold]Portfolio Summary:[/bold]")
         console.print(f"  Total Positions: {portfolio_data['total_positions']}")
         console.print(f"  Total Value: ${portfolio_data['total_value']:,.2f}")
         console.print(f"  Total P&L: ${portfolio_data['total_pnl']:,.2f}")
         console.print(f"  ROI: {portfolio_data['roi_percent']:,.1f}%\n")
-        
+
         # Display positions
         table = Table(title="Positions")
-        
+
         table.add_column("Market", style="cyan", no_wrap=False, max_width=50)
         table.add_column("Outcome", justify="center")
         table.add_column("Shares", justify="right", style="yellow")
         table.add_column("Avg Price", justify="right")
         table.add_column("Value", justify="right", style="green")
         table.add_column("P&L", justify="right")
-        
+
         for position in portfolio_data["positions"]:
             normalized = _extract_position_fields(position)
 
@@ -160,9 +160,9 @@ def portfolio(ctx, wallet):
                 f"${value:,.2f}",
                 pnl_text,
             )
-        
+
         console.print(table)
-    
+
     except Exception as e:
         console.print(f"[red]Error: {e}[/red]")
         import traceback

@@ -63,5 +63,3 @@ def export_screen(console: RichConsole):
 
     except Exception as e:
         console.print(f"[red]Error: {e}[/red]")
-
-

@@ -19,9 +19,9 @@ def test_monitor_screen(mock_run):
     """Test monitor screen launches with parameters"""
     mock_console = Mock()
     mock_console.input.side_effect = ["10", "", "2", "y"]
-    
+
     monitor_screen(mock_console)
-    
+
     # Should print panel and prompts
     assert mock_console.print.call_count >= 2
     # Should collect input
@@ -33,9 +33,9 @@ def test_whales_screen(mock_run):
     """Test whales screen launches with parameters"""
     mock_console = Mock()
     mock_console.input.side_effect = ["10000", "24", "20"]
-    
+
     whales_screen(mock_console)
-    
+
     # Should print panel and prompts
     assert mock_console.print.call_count >= 2
     # Should collect input
@@ -48,9 +48,9 @@ def test_watch_screen(mock_run):
     mock_console = Mock()
     # Provide all 4 inputs: query (looks like market ID), threshold, refresh
     mock_console.input.side_effect = ["abc123def456789abcdef0123", "5", "10"]
-    
+
     watch_screen(mock_console)
-    
+
     # Should print panel and prompts
     assert mock_console.print.call_count >= 2
     # Should collect input
@@ -107,9 +107,9 @@ def test_analytics_screen_coming_soon():
     """Test analytics screen coming soon features"""
     mock_console = Mock()
     mock_console.input.return_value = "2"
-    
+
     analytics_screen(mock_console)
-    
+
     # Should show coming soon message
     calls = [str(call) for call in mock_console.print.call_args_list]
     assert any("coming soon" in str(call).lower() for call in calls)
@@ -120,9 +120,9 @@ def test_portfolio_screen(mock_run):
     """Test portfolio screen launches"""
     mock_console = Mock()
     mock_console.input.return_value = "0x123..."
-    
+
     portfolio_screen(mock_console)
-    
+
     # Should print panel and prompts
     assert mock_console.print.call_count >= 2
 
@@ -133,9 +133,9 @@ def test_export_screen_json(mock_run):
     mock_run.return_value = Mock(returncode=0, stderr="")
     mock_console = Mock()
     mock_console.input.side_effect = ["market123", "json", "output.json"]
-    
+
     export_screen(mock_console)
-    
+
     # Should collect input
     assert mock_console.input.call_count == 3
 
@@ -144,9 +144,9 @@ def test_export_screen_no_market():
     """Test export screen handles no market input"""
     mock_console = Mock()
     mock_console.input.return_value = ""
-    
+
     export_screen(mock_console)
-    
+
     # Should show error
     calls = [str(call) for call in mock_console.print.call_args_list]
     assert any("no market" in str(call).lower() for call in calls)
@@ -163,12 +163,12 @@ def test_settings_screen(mock_config_class):
     mock_config.rate_limit_calls = 10
     mock_config.rate_limit_period = 60
     mock_config_class.return_value = mock_config
-    
+
     mock_console = Mock()
     mock_console.input.return_value = "4"
-    
+
     settings_screen(mock_console)
-    
+
     # Should display settings table
     assert mock_console.print.call_count >= 2
 
@@ -176,15 +176,13 @@ def test_settings_screen(mock_config_class):
 def test_help_screen():
     """Test help screen displays documentation"""
     mock_console = Mock()
-    
+
     help_screen(mock_console)
-    
+
     # Should print multiple sections
     assert mock_console.print.call_count >= 5
-    
+
     # Check that key sections are printed
     calls = [str(call) for call in mock_console.print.call_args_list]
     assert any("shortcuts" in str(call).lower() for call in calls)
     assert any("features" in str(call).lower() for call in calls)
-
-

@@ -50,4 +50,3 @@ echo "💻 Development commands:"
 echo "  make lint     # Check code"
 echo "  make format   # Format code"
 echo "  make run      # Start tracker"
-

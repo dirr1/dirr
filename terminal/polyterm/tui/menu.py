@@ -30,13 +30,13 @@ class MainMenu:
 
         try:
             current_version = polyterm.__version__
-            
+
             # Get latest version from PyPI
             response = requests.get("https://pypi.org/pypi/polyterm/json", timeout=5)
             if response.status_code == 200:
                 data = response.json()
                 latest_version = data["info"]["version"]
-                
+
                 # Compare versions
                 if version.parse(latest_version) > version.parse(current_version):
                     result = f" [bold green]🔄 Update Available: v{latest_version}[/bold green]", latest_version
@@ -49,7 +49,7 @@ class MainMenu:
 
         self._update_cache = ("", "")
         return "", ""
-    
+
     def _get_installed_version_pipx(self) -> str:
         """Get the currently installed version from pipx"""
         import subprocess
@@ -183,7 +183,7 @@ class MainMenu:
         except Exception as e:
             self.console.print(f"[bold red]❌ Update error: {e}[/bold red]")
             return False
-    
+
     def display(self):
         """Display paginated main menu"""
         # Check for updates first
@@ -260,7 +260,7 @@ class MainMenu:
         self.console.print()
         self.console.print(nav_hint)
         self.console.print()
-    
+
     def get_choice(self) -> str:
         """Get user menu choice, handling pagination navigation
 
@@ -286,5 +286,3 @@ class MainMenu:
     def reset_page(self):
         """Reset to first page"""
         self.current_page = 1
-
-

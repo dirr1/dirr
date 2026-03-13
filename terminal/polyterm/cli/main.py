@@ -9,13 +9,13 @@ from ..utils.config import Config
 @click.pass_context
 def cli(ctx):
     """PolyTerm - Terminal-based monitoring for PolyMarket
-    
+
     Track big moves, sudden shifts, and whale activity in prediction markets.
     """
     # Initialize config and pass to subcommands
     ctx.ensure_object(dict)
     ctx.obj["config"] = Config()
-    
+
     # If no subcommand, launch TUI
     if ctx.invoked_subcommand is None:
         from ..tui.controller import TUIController
@@ -45,28 +45,28 @@ def update():
     import requests
     import polyterm
     from rich.console import Console
-    
+
     console = Console()
-    
+
     try:
         console.print("[bold green]🔄 Checking for updates...[/bold green]")
-        
+
         # Get current version
         current_version = polyterm.__version__
         console.print(f"[green]Current version:[/green] {current_version}")
-        
+
         # Check for updates
         response = requests.get("https://pypi.org/pypi/polyterm/json", timeout=10)
         if response.status_code == 200:
             data = response.json()
             latest_version = data["info"]["version"]
-            
+
             if latest_version == current_version:
                 console.print(f"[green]✅ You're already running the latest version ({current_version})![/green]")
                 return
-            
+
             console.print(f"[yellow]📦 Update available:[/yellow] {current_version} → {latest_version}")
-            
+
             # Ask user if they want to update
             if click.confirm("Do you want to update now?"):
                 # Check for pipx first (preferred)
@@ -78,12 +78,12 @@ def update():
                     # Fallback to pip
                     update_cmd = [sys.executable, "-m", "pip", "install", "--upgrade", "polyterm"]
                     method = "pip"
-                
+
                 console.print(f"[dim]Using {method} to update...[/dim]")
-                
+
                 # Run update
                 result = subprocess.run(update_cmd, capture_output=True, text=True)
-                
+
                 if result.returncode == 0:
                     console.print(f"[bold green]✅ Update successful![/bold green]")
                     console.print(f"[green]Updated to version {latest_version}[/green]")
@@ -98,7 +98,7 @@ def update():
                 console.print("[yellow]Update cancelled.[/yellow]")
         else:
             console.print("[yellow]⚠️  Could not check for updates online[/yellow]")
-            
+
     except Exception as e:
         console.print(f"[bold red]❌ Update check failed: {e}[/bold red]")
         console.print("[yellow]Try running: pipx upgrade polyterm[/yellow]")
@@ -189,4 +189,3 @@ cli.add_command(news.news)
 
 if __name__ == "__main__":
     cli()
-

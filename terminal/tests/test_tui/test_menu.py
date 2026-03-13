@@ -71,7 +71,7 @@ def test_main_menu_display(mock_console_class):
 
     menu = MainMenu()
     menu.display()
-    
+
     # Should print panel and newline
     assert mock_console.print.call_count >= 1
 
@@ -82,10 +82,10 @@ def test_main_menu_get_choice(mock_console_class):
     mock_console = Mock()
     mock_console.input.return_value = "1"
     mock_console_class.return_value = mock_console
-    
+
     menu = MainMenu()
     choice = menu.get_choice()
-    
+
     assert choice == "1"
     assert mock_console.input.called
 
@@ -96,10 +96,8 @@ def test_main_menu_choice_lowercase(mock_console_class):
     mock_console = Mock()
     mock_console.input.return_value = "  Q  "
     mock_console_class.return_value = mock_console
-    
+
     menu = MainMenu()
     choice = menu.get_choice()
-    
+
     assert choice == "q"
-
-

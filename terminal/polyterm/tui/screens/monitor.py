@@ -142,29 +142,27 @@ def monitor_screen(console: RichConsole):
     console.print()
     refresh = console.input("Refresh rate in seconds? [cyan][default: 5][/cyan] ").strip() or "5"
     active_only = console.input("Active markets only? [cyan][Y/n][/cyan] ").strip().lower() != 'n'
-    
+
     console.print()
     console.print("[green]Starting monitor...[/green]")
     console.print("[dim]Press Ctrl+C to stop[/dim]")
     console.print()
-    
+
     # Build command
     cmd = [
         sys.executable, "-m", "polyterm.cli.main", "monitor",
         "--limit", limit,
         "--refresh", refresh,
     ]
-    
+
     if category:
         cmd.extend(["--category", category])
-    
+
     if active_only:
         cmd.append("--active-only")
-    
+
     # Launch monitor command
     try:
         subprocess.run(cmd)
     except KeyboardInterrupt:
         console.print("\n[yellow]Monitor stopped[/yellow]")
-
-

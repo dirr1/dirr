@@ -88,7 +88,7 @@ Events organize related markets:
   "event": "2025 Presidential Election",
   "markets": [
     "Will Trump win?",
-    "Will Biden win?", 
+    "Will Biden win?",
     "Will Harris win?",
     "Will DeSantis win?"
   ]
@@ -110,7 +110,7 @@ PolyTerm leverages Polymarket's API architecture to provide real-time market mon
 ### Data Flow
 
 1. **Primary Source**: Gamma API `/events` endpoint
-2. **Fallback**: CLOB API `/sampling-markets` 
+2. **Fallback**: CLOB API `/sampling-markets`
 3. **Enrichment**: Volume analysis for whale detection
 4. **Validation**: Freshness checks and data filtering
 
@@ -167,8 +167,8 @@ reject_closed_markets = true
 
 ---
 
-**Last Updated**: October 2025  
-**PolyTerm Version**: v0.1.5  
+**Last Updated**: October 2025
+**PolyTerm Version**: v0.1.5
 **Polymarket API Status**: Live and verified
 
 *This guide provides the foundation for understanding Polymarket's architecture when using PolyTerm for prediction market analysis.*

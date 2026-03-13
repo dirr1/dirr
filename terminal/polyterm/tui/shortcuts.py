@@ -10,7 +10,7 @@ SHORTCUTS = {
     '5': 'portfolio',
     '6': 'export',
     '7': 'settings',
-    
+
     # Alternative letter shortcuts
     'm': 'monitor',
     'w': 'whales',
@@ -18,7 +18,7 @@ SHORTCUTS = {
     'p': 'portfolio',
     'e': 'export',
     's': 'settings',
-    
+
     # Help and quit
     'h': 'help',
     '?': 'help',
@@ -30,13 +30,11 @@ SHORTCUTS = {
 
 def get_action(key: str) -> str:
     """Get action for a given key
-    
+
     Args:
         key: The key pressed (lowercase)
-    
+
     Returns:
         Action name or the key itself if no mapping
     """
     return SHORTCUTS.get(key.lower(), key)
-
-

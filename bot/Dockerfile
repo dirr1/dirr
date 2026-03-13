@@ -16,4 +16,3 @@ VOLUME ["/app/data"]
 
 # Run the bot
 CMD ["python", "run.py"]
-

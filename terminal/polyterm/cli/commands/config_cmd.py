@@ -15,17 +15,17 @@ from ...utils.config import Config
 @click.pass_context
 def config(ctx, set_value, get_key, list_all, reset):
     """Manage PolyTerm configuration"""
-    
+
     cfg = ctx.obj["config"]
     console = Console()
-    
+
     if reset:
         # Reset to defaults
         cfg.config = cfg.DEFAULT_CONFIG.copy()
         cfg.save()
         console.print("[green]Configuration reset to defaults[/green]")
         return
-    
+
     if set_value:
         # Set values
         for key, value in set_value:
@@ -41,14 +41,14 @@ def config(ctx, set_value, get_key, list_all, reset):
                         value = int(value)
                 except ValueError:
                     pass  # Keep as string
-            
+
             cfg.set(key, value)
             console.print(f"[green]Set {key} = {value}[/green]")
-        
+
         cfg.save()
         console.print(f"\n[cyan]Configuration saved to:[/cyan] {cfg.config_path}")
         return
-    
+
     if get_key:
         # Get single value
         value = cfg.get(get_key)
@@ -57,11 +57,11 @@ def config(ctx, set_value, get_key, list_all, reset):
         else:
             console.print(f"[yellow]Key not found: {get_key}[/yellow]")
         return
-    
+
     if list_all:
         # List all configuration
         console.print(f"[bold]Configuration:[/bold] {cfg.config_path}\n")
-        
+
         def print_dict(d, indent=0):
             for key, value in d.items():
                 if isinstance(value, dict):
@@ -69,15 +69,15 @@ def config(ctx, set_value, get_key, list_all, reset):
                     print_dict(value, indent + 1)
                 else:
                     console.print("  " * indent + f"[cyan]{key}:[/cyan] {value}")
-        
+
         print_dict(cfg.config)
         return
-    
+
     # Default: show common settings
     table = Table(title="PolyTerm Configuration")
     table.add_column("Setting", style="cyan")
     table.add_column("Value", style="yellow")
-    
+
     table.add_row("Config Path", str(cfg.config_path))
     table.add_row("", "")
     table.add_row("[bold]Alerts[/bold]", "")
@@ -92,8 +92,7 @@ def config(ctx, set_value, get_key, list_all, reset):
     table.add_row("", "")
     table.add_row("[bold]Wallet[/bold]", "")
     table.add_row("  Address", cfg.wallet_address or "[dim]Not set[/dim]")
-    
+
     console.print(table)
     console.print(f"\n[dim]Use 'polyterm config --list' for full configuration[/dim]")
     console.print(f"[dim]Use 'polyterm config --set key value' to update settings[/dim]")
-

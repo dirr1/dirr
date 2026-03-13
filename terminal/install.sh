@@ -11,7 +11,7 @@ echo "========================="
 # Check if pipx is installed
 if ! command -v pipx &> /dev/null; then
     echo "📦 Installing pipx (required for PolyTerm)..."
-    
+
     # Check if brew is available
     if command -v brew &> /dev/null; then
         brew install pipx
@@ -20,7 +20,7 @@ if ! command -v pipx &> /dev/null; then
         echo "   /bin/bash -c \"\$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)\""
         exit 1
     fi
-    
+
     # Ensure pipx path is in PATH
     pipx ensurepath
     echo "✅ pipx installed successfully!"

@@ -7,4 +7,3 @@ from .aggregator import APIAggregator
 from .data_api import DataAPIClient
 
 __all__ = ["GammaClient", "CLOBClient", "SubgraphClient", "APIAggregator", "DataAPIClient"]
-
