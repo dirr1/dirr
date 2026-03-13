@@ -169,3 +169,21 @@ class AnalysisEngine:
             'total_stake': total_stake,
             'suspicion_level': 'critical' if p_value < 0.01 and win_rate > 0.8 else 'high' if p_value < 0.05 else 'low'
         }
+
+    def detect_all_clusters(self, wallets_data: Dict[str, Dict]) -> List[Dict]:
+        """Detect clusters across all tracked wallets."""
+        clusters = []
+        addresses = list(wallets_data.keys())
+
+        for i in range(len(addresses)):
+            for j in range(i + 1, len(addresses)):
+                addr1, addr2 = addresses[i], addresses[j]
+                res = self.calculate_cluster_score(wallets_data[addr1]['trades'], wallets_data[addr2]['trades'])
+                if res['score'] >= 40: # Medium risk or higher
+                    clusters.append({
+                        'wallets': [addr1, addr2],
+                        'score': res['score'],
+                        'signals': res['signals'],
+                        'risk_level': res['risk_level']
+                    })
+        return clusters

@@ -33,6 +33,10 @@ def get_stats():
         "markets_cached": len(monitor_engine.market_cache)
     }
 
+@app.get("/alerts")
+def get_alerts():
+    return alert_manager.recent_alerts
+
 @app.get("/whales")
 def get_whales(min_volume: float = 10000):
     whales = []
@@ -44,6 +48,10 @@ def get_whales(min_volume: float = 10000):
                 "trade_count": len(data['trades'])
             })
     return sorted(whales, key=lambda x: x['total_volume'], reverse=True)
+
+@app.get("/clusters")
+def get_clusters():
+    return analysis_engine.detect_all_clusters(monitor_engine.wallets)
 
 @app.get("/suspicious-wallets")
 def get_suspicious():

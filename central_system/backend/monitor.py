@@ -45,7 +45,8 @@ class MonitorEngine:
                         info = {
                             'question': market.get('question', 'Unknown'),
                             'daily_volume': float(market.get('volume24hr', 0) or 0),
-                            'slug': market.get('slug', '')
+                            'slug': market.get('slug', ''),
+                            'outcome': market.get('outcome', '')
                         }
                         self.market_cache[condition_id] = info
                         return info
