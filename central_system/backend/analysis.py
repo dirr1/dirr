@@ -128,7 +128,10 @@ class AnalysisEngine:
         """
         Comprehensive wallet analysis.
         """
-        wallet_trades = [t for t in trades if t['wallet_address'] == wallet_address]
+        # Replace line 131 with this:
+        wallet_trades = [t for t in trades if isinstance(t, dict) and t.get('wallet_address') ==wallet_address]
+
+        #wallet_trades = [t for t in trades if t['wallet_address'] == wallet_address]
         if not wallet_trades:
             return {}
 
