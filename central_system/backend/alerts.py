@@ -22,6 +22,7 @@ class AlertManager:
         self.gemini_api_key = os.getenv("GEMINI_API_KEY")
         self.slack_webhook_url = os.getenv("SLACK_WEBHOOK_URL")
         self.discord_webhook_url = os.getenv("DISCORD_WEBHOOK_URL")
+        self.recent_alerts = [] # Store last 50 alerts in memory
 
         if self.gemini_api_key:
             try:
@@ -119,6 +120,11 @@ class AlertManager:
         # Run AI Forensics
         ai_result = await self.run_ai_forensics(alert_data)
         alert_data['ai_analysis'] = ai_result
+
+        # Store for dashboard
+        self.recent_alerts.insert(0, alert_data)
+        if len(self.recent_alerts) > 50:
+            self.recent_alerts.pop()
 
         # Send to channels
         self.send_slack_alert(alert_data)

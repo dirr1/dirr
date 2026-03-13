@@ -12,11 +12,15 @@ st.markdown("---")
 
 # Sidebar Stats
 try:
-    stats = requests.get(f"{API_URL}/stats").json()
-    st.sidebar.metric("Trades Analyzed", stats.get("total_trades_analyzed", 0))
-    st.sidebar.metric("Wallets Tracked", stats.get("unique_wallets_tracked", 0))
+    stats_res = requests.get(f"{API_URL}/stats", timeout=2)
+    if stats_res.status_code == 200:
+        stats = stats_res.json()
+        st.sidebar.metric("Trades Analyzed", stats.get("total_trades_analyzed", 0))
+        st.sidebar.metric("Wallets Tracked", stats.get("unique_wallets_tracked", 0))
+    else:
+        st.sidebar.warning(f"API Error: {stats_res.status_code}")
 except:
-    st.sidebar.warning("API Offline")
+    st.sidebar.warning("API Offline (Run uvicorn central_system.backend.api:app)")
 
 tabs = st.tabs(["🐋 Whale Tracker", "🚨 Suspicious Activity", "🗺️ Wallet Clustering", "🤖 AI Forensic Reports"])
 
@@ -52,19 +56,37 @@ with tabs[1]:
 
 with tabs[2]:
     st.header("Wallet Clustering Map")
-    st.info("Clustering algorithm is identifying linked wallets via timing and market overlap...")
-    st.image("https://via.placeholder.com/800x400.png?text=Wallet+Network+Graph+Placeholder", caption="Network visualization logic integrated in backend")
+    try:
+        clusters = requests.get(f"{API_URL}/clusters").json()
+        if clusters:
+            df_clu = pd.DataFrame(clusters)
+            st.dataframe(df_clu, use_container_width=True)
+            st.info(f"Identified {len(clusters)} suspicious wallet clusters.")
+        else:
+            st.info("No suspicious clusters identified yet.")
+    except:
+        st.error("Failed to fetch clustering data")
 
 with tabs[3]:
     st.header("AI Forensic Intelligence")
     st.markdown("""
-    This section displays automated reports from **Gemini 2.0 Flash** after cross-referencing trades with public news leaks.
-    Check Discord or Slack for real-time alert embeds.
+    Automated reports from **Gemini 2.0 Flash** with search grounding.
     """)
-    st.code("""
-    [REPORT] Wallet 0x123... flagged with 92% Insider Probability.
-    Reasoning: Trade occurred 12 minutes before Bloomberg report. No prior public mention found via Google Search grounding.
-    """)
+
+    try:
+        alerts = requests.get(f"{API_URL}/alerts").json()
+        if alerts:
+            for alert in alerts:
+                with st.expander(f"🚩 {alert['wallet_address'][:10]}... | {alert['market_question'][:50]}..."):
+                    st.write(f"**Value:** ${alert['value_usd']:,.2f}")
+                    st.write(f"**Price Shift:** {alert.get('price_shift', 'N/A')}")
+                    analysis = alert.get('ai_analysis', {})
+                    st.write(f"**AI Score:** {analysis.get('insider_probability_score', 'N/A')}/100")
+                    st.write(f"**Reasoning:** {analysis.get('reasoning', 'No analysis available.')}")
+        else:
+            st.info("No AI forensic reports generated yet.")
+    except:
+        st.error("Failed to fetch alerts from API")
 
 # Auto-refresh
 time.sleep(10)
