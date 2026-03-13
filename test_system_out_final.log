@@ -1,0 +1,7 @@
+/app/central_system/tests/test_system.py:65: DeprecationWarning: There is no current event loop
+  asyncio.get_event_loop().run_until_complete(self.monitor.process_trade({
+...
+----------------------------------------------------------------------
+Ran 3 tests in 0.005s
+
+OK

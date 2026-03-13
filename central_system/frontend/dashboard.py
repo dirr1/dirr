@@ -44,8 +44,8 @@ with tabs[1]:
             df_sus = pd.DataFrame(suspicious)
             st.dataframe(df_sus, use_container_width=True)
 
-            # Manual trigger
-            selected_wallet = st.selectbox("Select wallet for deep AI analysis", df_sus['address'].tolist() if not df_sus.empty else [])
+            # Deep Analysis
+            selected_wallet = st.selectbox("Select wallet for Deep AI Forensics", df_sus['address'].tolist() if not df_sus.empty else [])
             if st.button("Run Gemini 2.0 Forensics"):
                 res = requests.post(f"{API_URL}/trigger-manual-analysis/{selected_wallet}")
                 st.success(f"Analysis triggered: {res.json().get('status')}")
@@ -69,17 +69,14 @@ with tabs[2]:
 
 with tabs[3]:
     st.header("AI Forensic Intelligence")
-    st.markdown("""
-    Automated reports from **Gemini 2.0 Flash** with search grounding.
-    """)
+    st.markdown("Automated reports from **Gemini 2.0 Flash** with search grounding.")
 
     try:
         alerts = requests.get(f"{API_URL}/alerts").json()
         if alerts:
             for alert in alerts:
                 with st.expander(f"🚩 {alert['wallet_address'][:10]}... | {alert['market_question'][:50]}..."):
-                    st.write(f"**Value:** ${alert['value_usd']:,.2f}")
-                    st.write(f"**Price Shift:** {alert.get('price_shift', 'N/A')}")
+                    st.write(f"**Value:** ${alert['value_usd']:,.2f} | **Shift:** {alert.get('price_shift', 'N/A')}")
                     analysis = alert.get('ai_analysis', {})
                     st.write(f"**AI Score:** {analysis.get('insider_probability_score', 'N/A')}/100")
                     st.write(f"**Reasoning:** {analysis.get('reasoning', 'No analysis available.')}")
@@ -88,6 +85,10 @@ with tabs[3]:
     except:
         st.error("Failed to fetch alerts from API")
 
-# Auto-refresh
-time.sleep(10)
+# Lightweight auto-refresh
+if st.sidebar.button("Manual Refresh"):
+    st.rerun()
+
+st.sidebar.info("Dashboard auto-refreshes every 30s")
+time.sleep(30)
 st.rerun()
