@@ -28,7 +28,7 @@ def health():
 @app.get("/stats")
 def get_stats():
     return {
-        "total_trades_analyzed": len(monitor_engine.processed_trades),
+        "total_trades_analyzed": len(monitor_engine.processed_ids),
         "unique_wallets_tracked": len(monitor_engine.wallets),
         "markets_cached": len(monitor_engine.market_cache)
     }
