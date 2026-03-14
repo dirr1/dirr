@@ -12,7 +12,7 @@ from central_system.backend.alerts import AlertManager
 class MonitorEngine:
     """
     Unified monitoring engine.
-    Fixes: ID-based deduplication, ISO timestamp parsing, and memory management.
+    Enhanced for robust deduplication and numeric/ISO timestamp support.
     """
 
     DATA_API_URL = "https://data-api.polymarket.com"
@@ -21,13 +21,13 @@ class MonitorEngine:
     WHALE_THRESHOLD = 10000
     PRICE_SHIFT_THRESHOLD = 0.10 # 10%
     WINDOW_SECONDS = 300 # 5 minutes
-    CACHE_LIMIT = 50000 # Max unique trade IDs
+    CACHE_LIMIT = 50000 # Max unique trade markers
     TX_CACHE_LIMIT = 10000 # Max unique transaction hashes
 
     def __init__(self, analysis_engine: AnalysisEngine, alert_manager: AlertManager):
         self.analysis_engine = analysis_engine
         self.alert_manager = alert_manager
-        self.processed_ids = OrderedDict() # trade_id -> timestamp (to deduplicate fills)
+        self.processed_ids = OrderedDict() # composite_id -> timestamp
         self.processed_transactions = OrderedDict() # tx_hash -> aggregation_data
         self.market_cache = {}
         self.wallets = {} # address -> {trades: [], total_volume: 0}
@@ -58,25 +58,25 @@ class MonitorEngine:
             pass
         return {'question': 'Unknown', 'daily_volume': 0, 'slug': '', 'outcome': ''}
 
-    def _parse_timestamp(self, ts_str: Any) -> float:
+    def _parse_timestamp(self, ts: Any) -> float:
         """Parse ISO-8601 strings or numeric timestamps."""
-        if isinstance(ts_str, (int, float)):
-            return float(ts_str)
+        if isinstance(ts, (int, float)):
+            return float(ts)
         try:
-            # Polymarket Data API uses ISO strings
-            dt = dateutil.parser.isoparse(str(ts_str))
+            dt = dateutil.parser.isoparse(str(ts))
             return dt.timestamp()
         except Exception:
             return time.time()
 
     async def process_trade(self, trade: Dict[str, Any]):
-        trade_id = trade.get('id')
         tx_hash = trade.get('transactionHash')
-
-        if not trade_id or not tx_hash:
+        if not tx_hash:
             return
 
-        # 1. Deduplicate by unique Trade ID (Prevent polling overlap duplication)
+        # Unique trade marker: some responses lack 'id', so we use a composite key
+        trade_id = trade.get('id') or f"{tx_hash}_{trade.get('proxyWallet')}_{trade.get('size')}_{trade.get('timestamp')}"
+
+        # 1. Deduplicate by unique marker
         if trade_id in self.processed_ids:
             return
 
@@ -91,7 +91,7 @@ class MonitorEngine:
         condition_id = trade.get('conditionId')
         wallet_address = trade.get('proxyWallet', trade.get('maker', 'Unknown'))
 
-        # 2. Update Market History for Price Shift Detection
+        # 2. Update Market History
         if condition_id not in self.market_history:
             self.market_history[condition_id] = deque()
 
@@ -100,7 +100,7 @@ class MonitorEngine:
         while history and history[0][0] < timestamp - self.WINDOW_SECONDS:
             history.popleft()
 
-        # 3. Aggregate Taker executions (by Transaction Hash)
+        # 3. Aggregate Taker executions
         if tx_hash not in self.processed_transactions:
             self.processed_transactions[tx_hash] = {
                 'wallet': wallet_address,
@@ -119,7 +119,6 @@ class MonitorEngine:
         # 4. Check for Insider Criteria
         if agg['total_value'] >= 50000 and not agg['alerted']:
             if len(history) > 1:
-                # Compare current price against price BEFORE this transaction sequence
                 baseline_price = history[0][1]
                 shift = abs(price - baseline_price) / baseline_price if baseline_price else 0
 
@@ -136,7 +135,7 @@ class MonitorEngine:
                     }
                     asyncio.create_task(self.alert_manager.broadcast_alert(alert_data))
 
-        # 5. Update Wallet Stats (limited storage)
+        # 5. Update Wallet Stats
         if wallet_address not in self.wallets:
             self.wallets[wallet_address] = {'trades': [], 'total_volume': 0.0, 'first_seen': timestamp}
 
@@ -149,7 +148,7 @@ class MonitorEngine:
     async def start_polling(self, poll_interval: int = 1):
         self.running = True
         self.session = aiohttp.ClientSession()
-        print("Monitor Engine Started (ID-aware Ingestion)...")
+        print("Monitor Engine Started (High-Reliability Mode)...")
         while self.running:
             try:
                 nonce = random.randint(1, 1000000)
@@ -157,11 +156,9 @@ class MonitorEngine:
                 async with self.session.get(url, timeout=10) as response:
                     if response.status == 200:
                         trades = await response.json()
-                        # Process chronological (API returns newest-first)
                         for trade in reversed(trades):
                             await self.process_trade(trade)
 
-                # Cleanup inactive wallets
                 if len(self.wallets) > 20000:
                     sorted_wallets = sorted(self.wallets.items(), key=lambda x: x[1]['trades'][-1]['timestamp'] if x[1]['trades'] else 0)
                     for i in range(5000):
