@@ -7,3 +7,4 @@ scipy
 pandas
 google-genai
 python-dotenv
+python-dateutil

@@ -143,9 +143,12 @@ class AnalysisEngine:
             m = markets.get(t['market_id'])
             if not m or not m.get('outcome'): continue
 
-            # Simplified win/loss calculation
-            is_yes = t.get('outcome', '').upper() == 'YES' or t.get('side', '').upper() == 'BUY' # Heuristic
-            market_won = m['outcome'].upper() == 'YES'
+            # Simplified win/loss calculation: handle variations like "Yes", "YES", "yes"
+            outcome_val = str(t.get('outcome', '')).strip().upper()
+            is_yes = outcome_val == 'YES' or t.get('side', '').upper() == 'BUY'
+
+            market_outcome = str(m.get('outcome', '')).strip().upper()
+            market_won = market_outcome == 'YES'
 
             won = is_yes == market_won
             price = float(t.get('price', 0))
