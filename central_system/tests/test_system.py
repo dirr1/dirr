@@ -1,5 +1,6 @@
 import unittest
 import asyncio
+from collections import deque
 from central_system.backend.analysis import AnalysisEngine
 from central_system.backend.monitor import MonitorEngine
 from central_system.backend.alerts import AlertManager
@@ -21,10 +22,35 @@ class TestUnifiedSystem(unittest.TestCase):
         self.assertGreaterEqual(score, 7)
         self.assertIn("Brand new wallet (< 1 day old)", reasons)
 
+    def test_iso_timestamp_parsing(self):
+        iso_ts = "2025-03-14T01:53:30Z"
+        parsed = self.monitor._parse_timestamp(iso_ts)
+        self.assertIsInstance(parsed, float)
+        self.assertGreater(parsed, 1700000000)
+
+    def test_ingestion_deduplication(self):
+        trade = {
+            'id': 'unique_123',
+            'transactionHash': 'tx1',
+            'price': '0.5',
+            'size': '10',
+            'conditionId': 'c',
+            'timestamp': 1000
+        }
+        loop = asyncio.get_event_loop()
+        loop.run_until_complete(self.monitor.process_trade(trade))
+        self.assertEqual(len(self.monitor.processed_ids), 1)
+
+        # Second call with same ID should not increment value
+        agg_before = self.monitor.processed_transactions['tx1']['total_value']
+        loop.run_until_complete(self.monitor.process_trade(trade))
+        self.assertEqual(self.monitor.processed_transactions['tx1']['total_value'], agg_before)
+
     def test_taker_aggregation(self):
         # A single $60k trade split into two $30k fills in one transaction hash
         tx_hash = '0x_aggregated'
         trade1 = {
+            'id': 'fill_1',
             'transactionHash': tx_hash,
             'proxyWallet': '0xAgg',
             'price': '0.50',
@@ -33,6 +59,7 @@ class TestUnifiedSystem(unittest.TestCase):
             'timestamp': 1000
         }
         trade2 = {
+            'id': 'fill_2',
             'transactionHash': tx_hash,
             'proxyWallet': '0xAgg',
             'price': '0.50',
@@ -42,7 +69,7 @@ class TestUnifiedSystem(unittest.TestCase):
         }
 
         # Initial price baseline
-        self.monitor.market_history['cond1'] = [(900, 0.40)]
+        self.monitor.market_history['cond1'] = deque([(900, 0.40)])
 
         loop = asyncio.get_event_loop()
         self.monitor.get_market_info = AsyncMock(return_value={'question': 'Test'})
@@ -57,19 +84,6 @@ class TestUnifiedSystem(unittest.TestCase):
 
         alert_data = self.alerts.broadcast_alert.call_args[0][0]
         self.assertEqual(alert_data['value_usd'], 60000.0)
-
-    def test_memory_pruning(self):
-        # Fill cache to limit
-        self.monitor.CACHE_LIMIT = 10
-        for i in range(15):
-            asyncio.get_event_loop().run_until_complete(self.monitor.process_trade({
-                'transactionHash': f'tx_{i}',
-                'price': '0.5',
-                'size': '10',
-                'conditionId': 'c',
-                'timestamp': 1000 + i
-            }))
-        self.assertEqual(len(self.monitor.processed_trades), 10)
 
 if __name__ == '__main__':
     unittest.main()

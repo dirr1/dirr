@@ -30,7 +30,7 @@ with tabs[0]:
         whales = requests.get(f"{API_URL}/whales").json()
         if whales:
             df = pd.DataFrame(whales)
-            st.dataframe(df, use_container_width=True)
+            st.dataframe(df, width='stretch')
         else:
             st.info("No whales detected yet.")
     except:
@@ -42,7 +42,7 @@ with tabs[1]:
         suspicious = requests.get(f"{API_URL}/suspicious-wallets").json()
         if suspicious:
             df_sus = pd.DataFrame(suspicious)
-            st.dataframe(df_sus, use_container_width=True)
+            st.dataframe(df_sus, width='stretch')
 
             # Deep Analysis
             selected_wallet = st.selectbox("Select wallet for Deep AI Forensics", df_sus['address'].tolist() if not df_sus.empty else [])
@@ -60,7 +60,7 @@ with tabs[2]:
         clusters = requests.get(f"{API_URL}/clusters").json()
         if clusters:
             df_clu = pd.DataFrame(clusters)
-            st.dataframe(df_clu, use_container_width=True)
+            st.dataframe(df_clu, width='stretch')
             st.info(f"Identified {len(clusters)} suspicious wallet clusters.")
         else:
             st.info("No suspicious clusters identified yet.")
@@ -85,10 +85,13 @@ with tabs[3]:
     except:
         st.error("Failed to fetch alerts from API")
 
-# Lightweight auto-refresh
+# Sidebar auto-refresh control (Responsive implementation)
+st.sidebar.markdown("---")
 if st.sidebar.button("Manual Refresh"):
     st.rerun()
 
-st.sidebar.info("Dashboard auto-refreshes every 30s")
-time.sleep(30)
+# Using Streamlit Fragments for responsive refresh without blocking (Simulated via shorter loop and rerun)
+refresh_rate = st.sidebar.slider("Auto-refresh (seconds)", 5, 60, 30)
+st.sidebar.info(f"Last update: {time.strftime('%H:%M:%S')}")
+time.sleep(refresh_rate)
 st.rerun()
