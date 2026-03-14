@@ -21,37 +21,55 @@ class TestUnifiedSystem(unittest.TestCase):
         self.assertGreaterEqual(score, 7)
         self.assertIn("Brand new wallet (< 1 day old)", reasons)
 
-    def test_price_shift_detection(self):
-        # 1. First trade sets baseline price
+    def test_taker_aggregation(self):
+        # A single $60k trade split into two $30k fills in one transaction hash
+        tx_hash = '0x_aggregated'
         trade1 = {
-            'transactionHash': 'tx1',
-            'proxyWallet': '0x1',
+            'transactionHash': tx_hash,
+            'proxyWallet': '0xAgg',
             'price': '0.50',
-            'size': '10',
+            'size': '60000', # Value $30k
+            'conditionId': 'cond1',
+            'timestamp': 1000
+        }
+        trade2 = {
+            'transactionHash': tx_hash,
+            'proxyWallet': '0xAgg',
+            'price': '0.50',
+            'size': '60000', # Value $30k
             'conditionId': 'cond1',
             'timestamp': 1000
         }
 
-        # 2. Second trade causing 20% shift (0.50 -> 0.60)
-        trade2 = {
-            'transactionHash': 'tx2',
-            'proxyWallet': '0x1',
-            'price': '0.60',
-            'size': '100000', # Value $60k
-            'conditionId': 'cond1',
-            'timestamp': 1100 # Within 5 mins
-        }
+        # Initial price baseline
+        self.monitor.market_history['cond1'] = [(900, 0.40)]
 
         loop = asyncio.get_event_loop()
+        self.monitor.get_market_info = AsyncMock(return_value={'question': 'Test'})
+
+        # First fill doesn't trigger (only $30k)
         loop.run_until_complete(self.monitor.process_trade(trade1))
+        self.alerts.broadcast_alert.assert_not_called()
 
-        self.monitor.get_market_info = AsyncMock(return_value={'question': 'Test Market'})
+        # Second fill triggers aggregation to $60k and detects 25% shift (0.40 -> 0.50)
         loop.run_until_complete(self.monitor.process_trade(trade2))
-
-        # Verify alert was triggered
         self.alerts.broadcast_alert.assert_called_once()
-        alert_arg = self.alerts.broadcast_alert.call_args[0][0]
-        self.assertEqual(alert_arg['price_shift'], '20.00%')
+
+        alert_data = self.alerts.broadcast_alert.call_args[0][0]
+        self.assertEqual(alert_data['value_usd'], 60000.0)
+
+    def test_memory_pruning(self):
+        # Fill cache to limit
+        self.monitor.CACHE_LIMIT = 10
+        for i in range(15):
+            asyncio.get_event_loop().run_until_complete(self.monitor.process_trade({
+                'transactionHash': f'tx_{i}',
+                'price': '0.5',
+                'size': '10',
+                'conditionId': 'c',
+                'timestamp': 1000 + i
+            }))
+        self.assertEqual(len(self.monitor.processed_trades), 10)
 
 if __name__ == '__main__':
     unittest.main()
